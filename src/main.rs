@@ -21,7 +21,7 @@ fn main() {
         .expect("root block should have at least one entry");
     println!("   {first_entry:?}");
     let child_block = tree
-        .block_from_poslen_entry(first_entry)
+        .block_from_poslen_entry(&first_entry)
         .expect("could not find child block");
     println!(
         "===============\nCHILD BLOCK len: {}, level: {}, compression: {:?}",
