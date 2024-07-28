@@ -1,4 +1,6 @@
+mod error;
 mod format;
+mod nursery;
 
 fn main() {
     let dir = std::env::args().nth(1).expect("required directory to read");

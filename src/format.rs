@@ -1,6 +1,8 @@
+use crate::error::*;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+
 const TAG_KV_DATA: u8 = 0x80;
 const TAG_DELETED: u8 = 0x81;
 const TAG_POSLEN32: u8 = 0x82;
@@ -9,35 +11,6 @@ const TAG_TRANSACT: u8 = 0x83;
 const TAG_KV_DATA2: u8 = 0x84;
 const TAG_DELETED2: u8 = 0x85;
 const TAG_END: u8 = 0xFF;
-
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("invalid tree format")]
-    InvalidTreeFormat(Vec<u8>),
-
-    #[error("corrupted file: {0}")]
-    CorruptedFile(&'static str),
-
-    #[error("invalid compression type: {0}")]
-    InvalidCompression(u8),
-
-    #[error("incorrect block length, expected {0}, got {1}")]
-    IncorrectBlockLength(u32, u32),
-
-    #[error("expected PosLen entry")]
-    PosLenEntryRequired,
-
-    #[error("invalid entry tag {0}")]
-    InvalidEntryTag(u8),
-
-    #[error("internal buffer conversion error: {0}")]
-    SliceConversion(#[from] std::array::TryFromSliceError),
-
-    #[error("{0}")]
-    Io(#[from] std::io::Error),
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct Tree {
     file: File,
@@ -216,7 +189,7 @@ impl<'a> Block<'a> {
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub enum Entry {
+pub enum Entry<T> {
     KeyVal {
         key: Vec<u8>,
         value: Vec<u8>,
@@ -303,6 +276,56 @@ impl Entry {
             }
         };
         Ok((entry, 9 + length as u64))
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        // TODO: Refactor to pre-allocate the entire encoded version with size+crc+tag
+        let mut entry = vec![];
+        match self {
+            Entry::KeyVal {
+                key,
+                value,
+                timestamp,
+            } => {
+                if let Some(ts) = timestamp {
+                    entry.push(TAG_KV_DATA2);
+                    entry.extend(ts.to_be_bytes());
+                } else {
+                    entry.push(TAG_KV_DATA);
+                }
+                // UNSAFE: usize could exceed u32
+                let key_size = (key.len() as u32).to_be_bytes();
+                entry.extend(key_size);
+                entry.extend(key);
+                entry.extend(value);
+            }
+            Entry::Deleted { key, timestamp } => {
+                if let Some(ts) = timestamp {
+                    entry.push(TAG_DELETED2);
+                    entry.extend(ts.to_be_bytes());
+                } else {
+                    entry.push(TAG_DELETED);
+                }
+                entry.extend(key);
+            }
+            Entry::PosLen {
+                blockpos,
+                blocklen,
+                key,
+            } => {
+                entry.push(TAG_POSLEN32);
+                entry.extend(blockpos.to_be_bytes());
+                entry.extend(blocklen.to_be_bytes());
+                entry.extend(key);
+            }
+        }
+        let mut output = Vec::with_capacity(entry.len() + 9);
+        // UNSAFE: usize could exceed u32
+        output.extend((entry.len() as u32).to_be_bytes());
+        output.extend(crc32fast::hash(&entry).to_be_bytes());
+        output.extend(entry);
+        output.push(TAG_END);
+        output
     }
 }
 
