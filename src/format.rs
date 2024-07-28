@@ -100,6 +100,42 @@ impl Tree {
             root_pos,
         })
     }
+
+    pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
+        // TODO: read the bloom filter and bail early if
+        // it's not in the file
+        let mut block = self.root_block().ok()?;
+        loop {
+            // level > 0 -> inner block
+            // level == 0 -> leaf block
+            if block.level > 0 {
+                let entry = block
+                    .entries()
+                    .take_while(|e| {
+                        !matches!(e, Entry::PosLen {
+                            key: first_key,
+                            ..
+                        } if key < first_key)
+                    })
+                    .last();
+                if let Some(inner_entry) = entry {
+                    // Go to the next lower level in the tree
+                    block = self.block_from_poslen_entry(&inner_entry).ok()?;
+                } else {
+                    return None;
+                }
+            } else {
+                return block.entries().find_map(|entry| match entry {
+                    Entry::KeyVal {
+                        key: found_key,
+                        value,
+                        ..
+                    } if key == found_key => Some(value),
+                    _ => None,
+                });
+            }
+        }
+    }
 }
 
 #[derive(Debug)]

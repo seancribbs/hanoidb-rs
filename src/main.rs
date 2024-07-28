@@ -30,4 +30,8 @@ fn main() {
     for entry in child_block.entries() {
         println!("\t{entry:?}");
     }
+    println!("===============\nSEARCHING FOR KEY");
+    let key = vec![97, 97, 97, 97];
+    let result = tree.get(&key);
+    println!("Found key {key:?}: {result:?}");
 }
