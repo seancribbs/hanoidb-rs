@@ -23,6 +23,12 @@ pub enum Error {
 
     #[error("{0}")]
     Io(#[from] std::io::Error),
+
+    #[error("end of file reached")]
+    EndOfFile,
+
+    #[error("incomplete entry - {0}")]
+    IncompleteEntry(std::io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

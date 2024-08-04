@@ -1,6 +1,6 @@
 use crate::error::*;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{ErrorKind, Read, Seek, SeekFrom};
 use std::path::Path;
 
 const TAG_KV_DATA: u8 = 0x80;
@@ -153,19 +153,24 @@ pub struct Block<'a> {
 impl<'a> Block<'a> {
     fn from_start(mut file: &'a File, start: u64) -> Result<Self> {
         file.seek(SeekFrom::Start(start))?;
-        let mut header = vec![0; 7];
+        let mut header = vec![0; 8];
         file.read_exact(&mut header)?;
         let blocklen = u32::from_be_bytes(header[0..4].try_into()?);
         let level = u16::from_be_bytes(header[4..6].try_into()?);
         let compression: Compression = header[6].try_into()?;
-
-        Ok(Self {
-            start,
-            blocklen,
-            level,
-            compression,
-            file,
-        })
+        if header[7] == TAG_END {
+            Ok(Self {
+                start,
+                blocklen,
+                level,
+                compression,
+                file,
+            })
+        } else {
+            Err(Error::CorruptedFile(
+                "block entries did not start with TAG_END",
+            ))
+        }
     }
 
     fn from_start_length(file: &'a File, start: u64, length: u32) -> Result<Self> {
@@ -181,15 +186,15 @@ impl<'a> Block<'a> {
     pub fn entries(&self) -> EntryIterator<'a> {
         EntryIterator {
             file: self.file,
-            start: self.start + 7, // Skip the header part of the block (7 bytes)
-            end: self.start + (self.blocklen as u64) - 1, // entries always end in TAG_END
+            start: self.start + 8, // Skip the header part of the block (8 bytes)
+            end: self.start + (self.blocklen as u64),
         }
     }
 }
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub enum Entry<T> {
+pub enum Entry {
     KeyVal {
         key: Vec<u8>,
         value: Vec<u8>,
@@ -207,16 +212,25 @@ pub enum Entry<T> {
 }
 
 impl Entry {
-    fn read(mut file: &File) -> Result<(Self, u64)> {
-        let mut header = vec![0; 9];
-        file.read_exact(&mut header)?;
-        if header[0] != TAG_END {
-            return Err(Error::CorruptedFile("First byte of entry wasn't TAG_END"));
-        }
-        let length = u32::from_be_bytes(header[1..5].try_into()?);
-        let orig_crc = u32::from_be_bytes(header[5..9].try_into()?);
+    pub(crate) fn read(mut file: &File) -> Result<(Self, u64)> {
+        let mut header = vec![0; 8];
+        file.read_exact(&mut header).map_err(|err| {
+            if err.kind() == ErrorKind::UnexpectedEof {
+                Error::EndOfFile
+            } else {
+                err.into()
+            }
+        })?;
+        let length = u32::from_be_bytes(header[0..4].try_into()?);
+        let orig_crc = u32::from_be_bytes(header[4..8].try_into()?);
         let mut entry_data = vec![0; length as usize];
-        file.read_exact(&mut entry_data)?;
+        file.read_exact(&mut entry_data).map_err(|err| {
+            if err.kind() == ErrorKind::UnexpectedEof {
+                Error::IncompleteEntry(err)
+            } else {
+                err.into()
+            }
+        })?;
         let crc = crc32fast::hash(&entry_data);
         if crc != orig_crc {
             return Err(Error::CorruptedFile("Entry had incorrect CRC32"));
@@ -275,12 +289,19 @@ impl Entry {
                 return Err(Error::InvalidEntryTag(tag));
             }
         };
+        let mut tag = vec![0; 1];
+        file.read_exact(&mut tag)?;
+        if tag[0] != TAG_END {
+            return Err(Error::CorruptedFile("Last byte of entry wasn't TAG_END"));
+        }
         Ok((entry, 9 + length as u64))
     }
 
     pub fn encode(&self) -> Vec<u8> {
-        // TODO: Refactor to pre-allocate the entire encoded version with size+crc+tag
-        let mut entry = vec![];
+        let total_size = self.encoded_size();
+        let mut entry = Vec::with_capacity(total_size);
+        entry.extend(((total_size - 9) as u32).to_be_bytes());
+        entry.extend([0, 0, 0, 0]); // spot for CRC32
         match self {
             Entry::KeyVal {
                 key,
@@ -319,13 +340,36 @@ impl Entry {
                 entry.extend(key);
             }
         }
-        let mut output = Vec::with_capacity(entry.len() + 9);
-        // UNSAFE: usize could exceed u32
-        output.extend((entry.len() as u32).to_be_bytes());
-        output.extend(crc32fast::hash(&entry).to_be_bytes());
-        output.extend(entry);
-        output.push(TAG_END);
-        output
+        entry.push(TAG_END);
+        let crc = crc32fast::hash(&entry[8..]).to_be_bytes();
+        entry[4..8].copy_from_slice(&crc);
+        entry
+    }
+
+    fn encoded_size(&self) -> usize {
+        // entry len + crc32 + trailing TAG_END
+        9 + match self {
+            Entry::KeyVal {
+                key,
+                value,
+                timestamp,
+            } => {
+                // Tag + optional timestamp u32 + key len + key + value
+                1 + timestamp.as_ref().map(|_| 4).unwrap_or_default()
+                    + 4
+                    + key.len()
+                    + value.len()
+                    + 1
+            }
+            Entry::Deleted { key, timestamp } => {
+                // Tag + optional timestamp u32 + key
+                1 + timestamp.as_ref().map(|_| 4).unwrap_or_default() + key.len()
+            }
+            Entry::PosLen { key, .. } => {
+                // Tag + blockpos + blocklen + key
+                1 + 4 + 4 + key.len()
+            }
+        }
     }
 }
 

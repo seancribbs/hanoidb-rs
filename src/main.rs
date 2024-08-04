@@ -1,9 +1,16 @@
+use error::Result;
+use nursery::Nursery;
+
 mod error;
 mod format;
 mod nursery;
 
-fn main() {
+fn main() -> Result<()> {
     let dir = std::env::args().nth(1).expect("required directory to read");
+    println!("==============\n CREATING NURSERY:");
+    let nursery = Nursery::new(&dir, 10, 25)?;
+    println!("  {nursery:?}");
+
     let file = std::fs::read_dir(dir)
         .expect("argument is not a directory")
         .next()
@@ -36,4 +43,5 @@ fn main() {
     let key = vec![97, 97, 97, 97];
     let result = tree.get(&key);
     println!("Found key {key:?}: {result:?}");
+    Ok(())
 }
