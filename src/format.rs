@@ -340,9 +340,9 @@ impl Entry {
                 entry.extend(key);
             }
         }
-        entry.push(TAG_END);
         let crc = crc32fast::hash(&entry[8..]).to_be_bytes();
         entry[4..8].copy_from_slice(&crc);
+        entry.push(TAG_END);
         entry
     }
 
