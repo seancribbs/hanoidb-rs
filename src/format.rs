@@ -355,11 +355,7 @@ impl Entry {
                 timestamp,
             } => {
                 // Tag + optional timestamp u32 + key len + key + value
-                1 + timestamp.as_ref().map(|_| 4).unwrap_or_default()
-                    + 4
-                    + key.len()
-                    + value.len()
-                    + 1
+                1 + timestamp.as_ref().map(|_| 4).unwrap_or_default() + 4 + key.len() + value.len()
             }
             Entry::Deleted { key, timestamp } => {
                 // Tag + optional timestamp u32 + key
