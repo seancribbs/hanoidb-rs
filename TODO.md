@@ -1,3 +1,2 @@
-- [ ] What is the fanout of the b-tree?
-- [ ] Nursery - format of its data and its log
-- [X] Load a tree without reading the entire file at once
+- [ ] Write any pending blocks on close in writer.rs
+- [ ] Write nursery.data when we recover the nursery.log

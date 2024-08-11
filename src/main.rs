@@ -4,6 +4,7 @@ use nursery::Nursery;
 mod error;
 mod format;
 mod nursery;
+mod writer;
 
 fn main() -> Result<()> {
     let dir = std::env::args().nth(1).expect("required directory to read");

@@ -5,4 +5,5 @@ edition = "2021"
 
 [dependencies]
 crc32fast = "1.4.2"
+derive_more = { version = "1.0.0", features = ["is_variant"] }
 thiserror = "1.0.63"

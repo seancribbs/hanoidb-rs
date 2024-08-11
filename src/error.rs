@@ -29,6 +29,9 @@ pub enum Error {
 
     #[error("incomplete entry - {0}")]
     IncompleteEntry(std::io::Error),
+
+    #[error("out-of-order write")]
+    OutOfOrderWrite,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

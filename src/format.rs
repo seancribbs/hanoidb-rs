@@ -10,7 +10,7 @@ const TAG_POSLEN32: u8 = 0x82;
 const TAG_TRANSACT: u8 = 0x83;
 const TAG_KV_DATA2: u8 = 0x84;
 const TAG_DELETED2: u8 = 0x85;
-const TAG_END: u8 = 0xFF;
+pub const TAG_END: u8 = 0xFF;
 
 pub struct Tree {
     file: File,
@@ -192,7 +192,7 @@ impl<'a> Block<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, derive_more::IsVariant)]
 #[allow(dead_code)]
 pub enum Entry {
     KeyVal {
@@ -212,6 +212,14 @@ pub enum Entry {
 }
 
 impl Entry {
+    pub(crate) fn key(&self) -> &[u8] {
+        match self {
+            Entry::KeyVal { key, .. } | Entry::Deleted { key, .. } | Entry::PosLen { key, .. } => {
+                key.as_slice()
+            }
+        }
+    }
+
     pub(crate) fn read(mut file: &File) -> Result<(Self, u64)> {
         let mut header = vec![0; 8];
         file.read_exact(&mut header).map_err(|err| {
@@ -346,7 +354,7 @@ impl Entry {
         entry
     }
 
-    fn encoded_size(&self) -> usize {
+    pub(crate) fn encoded_size(&self) -> usize {
         // entry len + crc32 + trailing TAG_END
         9 + match self {
             Entry::KeyVal {
