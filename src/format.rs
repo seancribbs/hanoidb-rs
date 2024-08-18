@@ -118,6 +118,29 @@ pub struct Trailer {
     root_pos: u64,
 }
 
+impl Trailer {
+    pub fn new(bloom: Vec<u8>, root_pos: u64) -> Result<Self> {
+        let bloom_len: u32 = bloom
+            .len()
+            .try_into()
+            .map_err(|_| Error::BloomFilterTooLarge)?;
+        Ok(Self {
+            bloom,
+            bloom_len,
+            root_pos,
+        })
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        let mut buffer = Vec::with_capacity(self.bloom.len() + 12);
+        buffer.extend([0, 0, 0, 0]);
+        buffer.extend(&self.bloom);
+        buffer.extend(self.bloom_len.to_be_bytes());
+        buffer.extend(self.root_pos.to_be_bytes());
+        buffer
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Compression {
@@ -348,7 +371,7 @@ impl Entry {
                 entry.extend(key);
             }
         }
-        let crc = crc32fast::hash(&entry[8..]).to_be_bytes();
+        let crc = crc32fast::hash(&entry[8..(total_size - 1)]).to_be_bytes();
         entry[4..8].copy_from_slice(&crc);
         entry.push(TAG_END);
         entry
@@ -371,7 +394,7 @@ impl Entry {
             }
             Entry::PosLen { key, .. } => {
                 // Tag + blockpos + blocklen + key
-                1 + 4 + 4 + key.len()
+                1 + 8 + 4 + key.len()
             }
         }
     }

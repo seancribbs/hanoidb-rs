@@ -32,6 +32,9 @@ pub enum Error {
 
     #[error("out-of-order write")]
     OutOfOrderWrite,
+
+    #[error("bloom filter too large")]
+    BloomFilterTooLarge,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::*;
 use crate::format::Entry;
+use crate::writer::Writer;
 
 #[derive(Debug, Clone)]
 enum Value {
@@ -31,7 +32,7 @@ impl Nursery {
     pub fn new(directory: impl AsRef<Path>, min_level: u32, max_level: u32) -> Result<Self> {
         let directory = directory.as_ref().to_path_buf();
         let file = directory.join("nursery.log");
-        let (data, total_size) = Self::recover(&file)?;
+        Self::recover(&file)?;
         let log = OpenOptions::new()
             .create_new(true)
             .append(true)
@@ -41,8 +42,8 @@ impl Nursery {
             directory,
             min_level,
             max_level,
-            data,
-            total_size,
+            data: Default::default(),
+            total_size: 0,
             step: 0,
             merge_done: 0,
         })
@@ -79,17 +80,16 @@ impl Nursery {
         Ok(())
     }
 
-    fn recover(log_file: impl AsRef<Path>) -> Result<(NurseryData, usize)> {
+    fn recover(log_file: impl AsRef<Path>) -> Result<()> {
         if !log_file.as_ref().exists() {
-            return Ok((Default::default(), 0));
+            return Ok(());
         }
 
         let file = OpenOptions::new().read(true).open(&log_file)?;
-        let mut data: NurseryData = Default::default();
-        let mut total_size = 0;
+        let mut data: BTreeMap<Vec<u8>, Entry> = Default::default();
         loop {
-            let (entry, size) = match Entry::read(&file) {
-                Ok((entry, size)) => (entry, size),
+            let entry = match Entry::read(&file) {
+                Ok((entry, _)) => entry,
                 Err(err) => {
                     if !matches!(err, Error::EndOfFile) {
                         eprintln!("Error reading {}, {err}", log_file.as_ref().display());
@@ -97,22 +97,28 @@ impl Nursery {
                     break;
                 }
             };
-            // TODO: Update this when we support timestamps
-            match entry {
-                Entry::KeyVal { key, value, .. } => {
-                    data.insert(key, Value::Plain(value));
-                    total_size += size as usize;
-                }
-                Entry::Deleted { key, .. } => {
-                    data.insert(key, Value::Deleted);
-                    total_size += size as usize;
-                }
-                Entry::PosLen { .. } => {
-                    unreachable!("nursery log contained b-tree internal entries");
-                }
+
+            if entry.is_pos_len() {
+                unreachable!("nursery log contained b-tree internal entries");
             }
+
+            data.insert(entry.key().to_owned(), entry);
         }
+
+        // Write out nursery.data from the recovered log
+        if !data.is_empty() {
+            let mut data_file = log_file.as_ref().to_path_buf();
+            data_file.set_file_name("nursery.data");
+            let mut writer = Writer::new(data_file)?;
+            for (_, entry) in data.into_iter() {
+                writer.add(entry)?;
+            }
+            writer.close()?;
+        }
+
+        // TODO: Inject nursery.data into the first level
+
         remove_file(log_file)?;
-        Ok((data, total_size))
+        Ok(())
     }
 }

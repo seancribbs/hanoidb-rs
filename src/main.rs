@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use error::Result;
 use nursery::Nursery;
 
@@ -10,6 +12,21 @@ fn main() -> Result<()> {
     let dir = std::env::args().nth(1).expect("required directory to read");
     println!("==============\n CREATING NURSERY:");
     let nursery = Nursery::new(&dir, 10, 25)?;
+    let mut nursery_data = Path::new(&dir).to_path_buf();
+    nursery_data.push("nursery.data");
+    if nursery_data.exists() {
+        println!("Nursery recover data exists!");
+        let tree = format::Tree::from_file(&nursery_data).expect("couldn't load nursery.data");
+        let root = tree.root_block().expect("tree didn't have root block");
+        println!(
+            "    ===========\nNURSERY ROOT BLOCK len: {}, level: {}, compression: {:?}",
+            root.blocklen, root.level, root.compression
+        );
+        println!(" Root block has {} entries", root.entries().count());
+        for entry in root.entries() {
+            println!("        {entry:?}");
+        }
+    }
     println!("  {nursery:?}");
 
     let file = std::fs::read_dir(dir)
