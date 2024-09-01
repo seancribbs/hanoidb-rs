@@ -74,6 +74,10 @@ impl Tree {
         })
     }
 
+    pub fn entries(&self) -> Result<TreeEntryIterator<'_>> {
+        TreeEntryIterator::new(self)
+    }
+
     pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
         // TODO: read the bloom filter and bail early if
         // it's not in the file
@@ -106,6 +110,45 @@ impl Tree {
                     } if key == found_key => Some(value),
                     _ => None,
                 });
+            }
+        }
+    }
+}
+
+pub struct TreeEntryIterator<'a> {
+    tree: &'a Tree,
+    levels: Vec<EntryIterator<'a>>,
+}
+
+impl<'a> TreeEntryIterator<'a> {
+    fn new(tree: &'a Tree) -> Result<Self> {
+        Ok(Self {
+            tree,
+            levels: vec![tree.root_block()?.entries()],
+        })
+    }
+}
+
+impl<'a> Iterator for TreeEntryIterator<'a> {
+    type Item = Entry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let level = self.levels.last_mut()?;
+            match level.next() {
+                Some(entry @ Entry::PosLen { .. }) => {
+                    let block_iterator = self.tree.block_from_poslen_entry(&entry).ok()?.entries();
+                    self.levels.push(block_iterator);
+                    continue;
+                }
+                entry @ Some(_) => {
+                    return entry;
+                }
+                None => {
+                    // pop this iterator off
+                    let _ = self.levels.pop();
+                    continue;
+                }
             }
         }
     }

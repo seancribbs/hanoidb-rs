@@ -5,6 +5,7 @@ use nursery::Nursery;
 
 mod error;
 mod format;
+mod merger;
 mod nursery;
 mod writer;
 
