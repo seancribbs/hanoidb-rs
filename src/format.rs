@@ -30,6 +30,12 @@ impl Tree {
         }
     }
 
+    pub fn try_clone(&self) -> Result<Self> {
+        let file = self.file.try_clone()?;
+        let len = file.metadata()?.len();
+        Ok(Self { file, len })
+    }
+
     pub fn root_block(&self) -> Result<Block<'_>> {
         let trailer = self.trailer()?;
         let start = trailer.root_pos;
@@ -78,6 +84,10 @@ impl Tree {
         TreeEntryIterator::new(self)
     }
 
+    pub fn entries_owned(&self) -> Result<OwnedTreeEntryIterator> {
+        OwnedTreeEntryIterator::new(self.try_clone()?)
+    }
+
     pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
         // TODO: read the bloom filter and bail early if
         // it's not in the file
@@ -110,6 +120,49 @@ impl Tree {
                     } if key == found_key => Some(value),
                     _ => None,
                 });
+            }
+        }
+    }
+}
+
+pub struct OwnedTreeEntryIterator {
+    tree: Tree,
+    levels: Vec<OwnedEntryIterator>,
+}
+
+impl OwnedTreeEntryIterator {
+    fn new(tree: Tree) -> Result<Self> {
+        Ok(Self {
+            tree,
+            levels: vec![tree.root_block()?.entries_owned()?],
+        })
+    }
+}
+
+impl Iterator for OwnedTreeEntryIterator {
+    type Item = Entry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let level = self.levels.last_mut()?;
+            match level.next() {
+                Some(entry @ Entry::PosLen { .. }) => {
+                    let block_iterator = self
+                        .tree
+                        .block_from_poslen_entry(&entry)
+                        .ok()?
+                        .entries_owned()?;
+                    self.levels.push(block_iterator);
+                    continue;
+                }
+                entry @ Some(_) => {
+                    return entry;
+                }
+                None => {
+                    // pop this iterator off
+                    let _ = self.levels.pop();
+                    continue;
+                }
             }
         }
     }
@@ -255,6 +308,15 @@ impl<'a> Block<'a> {
             start: self.start + 8, // Skip the header part of the block (8 bytes)
             end: self.start + (self.blocklen as u64),
         }
+    }
+
+    pub fn entries_owned(&self) -> Result<OwnedEntryIterator> {
+        let file = self.file.try_clone()?;
+        Ok(OwnedEntryIterator {
+            file,
+            start: self.start + 8,
+            end: self.start + (self.blocklen as u64),
+        })
     }
 }
 
@@ -438,6 +500,41 @@ impl Entry {
             Entry::PosLen { key, .. } => {
                 // Tag + blockpos + blocklen + key
                 1 + 8 + 4 + key.len()
+            }
+        }
+    }
+}
+
+pub struct OwnedEntryIterator {
+    file: File,
+    start: u64,
+    end: u64,
+}
+
+impl Iterator for OwnedEntryIterator {
+    type Item = Entry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.start >= self.end {
+            return None;
+        }
+
+        if self.file.seek(SeekFrom::Start(self.start)).is_err() {
+            // TODO: Don't swallow the result of the above call
+            // Ensure iterator terminates when there's an IO problem
+            self.start = self.end;
+            return None;
+        }
+
+        match Entry::read(&self.file) {
+            Ok((entry, read_amount)) => {
+                self.start += read_amount;
+                Some(entry)
+            }
+            Err(_) => {
+                // Ensure iterator terminates when there's a problem reading an Entry
+                self.start = self.end;
+                None
             }
         }
     }

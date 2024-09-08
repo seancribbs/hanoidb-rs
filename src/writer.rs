@@ -1,6 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::*;
 use crate::format::{Compression, Entry, Trailer, TAG_END};
@@ -22,6 +22,7 @@ impl Block {
 }
 
 pub struct Writer {
+    name: PathBuf,
     index_file: File,
     index_file_pos: u64,
     last_node_pos: Option<u64>,
@@ -33,6 +34,15 @@ pub struct Writer {
     tombstone_count: usize,
 }
 
+impl std::fmt::Debug for Writer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Writer")
+            .field("file", &self.name)
+            .field("count", &self.count())
+            .finish()
+    }
+}
+
 impl Writer {
     pub(crate) fn new(name: impl AsRef<Path>) -> Result<Self> {
         let mut index_file = OpenOptions::new()
@@ -41,6 +51,7 @@ impl Writer {
             .open(name.as_ref())?;
         index_file.write_all("HAN2".as_bytes())?;
         Ok(Self {
+            name: name.as_ref().to_path_buf(),
             index_file,
             index_file_pos: FIRST_BLOCK_POS,
             last_node_pos: None,
