@@ -3,6 +3,7 @@ use std::fs::{remove_file, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::db::Command;
 use crate::error::*;
 use crate::format::Entry;
 use crate::writer::Writer;
@@ -20,36 +21,37 @@ type NurseryData = BTreeMap<Vec<u8>, Value>;
 pub struct Nursery {
     log: File,
     directory: PathBuf,
-    min_level: u32,
-    max_level: u32,
     data: NurseryData,
+    min_level: u32,
     total_size: usize,
-    step: usize,
+    step: i32,
     merge_done: usize,
 }
 
 impl Nursery {
-    pub fn new(directory: impl AsRef<Path>, min_level: u32, max_level: u32) -> Result<Self> {
+    pub fn new(directory: impl AsRef<Path>, min_level: u32) -> Result<(Self, Option<Command>)> {
         let directory = directory.as_ref().to_path_buf();
         let file = directory.join("nursery.log");
-        Self::recover(&file)?;
+        let recovery = Self::recover(&file, min_level)?;
         let log = OpenOptions::new()
             .create_new(true)
             .append(true)
             .open(file)?;
-        Ok(Self {
-            log,
-            directory,
-            min_level,
-            max_level,
-            data: Default::default(),
-            total_size: 0,
-            step: 0,
-            merge_done: 0,
-        })
+        Ok((
+            Self {
+                log,
+                directory,
+                data: Default::default(),
+                min_level,
+                total_size: 0,
+                step: 0,
+                merge_done: 0,
+            },
+            recovery,
+        ))
     }
 
-    pub fn add(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+    pub fn add(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<Vec<Command>> {
         let bin_entry = Entry::KeyVal {
             key: key.clone(),
             value: value.clone(),
@@ -59,7 +61,7 @@ impl Nursery {
         self.write_internal(key, Value::Plain(value), bin_entry)
     }
 
-    pub fn remove(&mut self, key: Vec<u8>) -> Result<()> {
+    pub fn remove(&mut self, key: Vec<u8>) -> Result<Vec<Command>> {
         let bin_entry = Entry::Deleted {
             key: key.clone(),
             timestamp: None,
@@ -68,21 +70,68 @@ impl Nursery {
         self.write_internal(key, Value::Deleted, bin_entry)
     }
 
-    fn write_internal(&mut self, key: Vec<u8>, value: Value, bin_entry: Vec<u8>) -> Result<()> {
+    fn write_internal(
+        &mut self,
+        key: Vec<u8>,
+        value: Value,
+        bin_entry: Vec<u8>,
+    ) -> Result<Vec<Command>> {
         self.data.insert(key, value);
         self.log.write_all(&bin_entry)?;
         self.log.sync_data()?;
         self.total_size += bin_entry.len();
-        // TODO: invoke incremental merge
-        // Number of merge steps should be key count of min level / 2 (e.g. keys = 1024 -> 512 steps)
-        // -define(INC_MERGE_STEP, ?BTREE_SIZE(MinLevel) div 2).
-        self.step += 1;
-        Ok(())
+        let mut commands = vec![];
+
+        // Check if the in-memory data is big enough to promote to the next level
+        let min_level_size = 1 << self.min_level;
+        if self.data.len() >= min_level_size as usize {
+            let filename = self.directory.join("nursery.data");
+            let mut writer = Writer::new(&filename)?;
+            let data = std::mem::take(&mut self.data);
+            for (key, value) in data.into_iter() {
+                let entry = match value {
+                    Value::Plain(value) => Entry::KeyVal {
+                        key,
+                        value,
+                        timestamp: None,
+                    },
+                    Value::Deleted => Entry::Deleted {
+                        key,
+                        timestamp: None,
+                    },
+                };
+                writer.add(entry)?;
+            }
+            writer.close()?;
+            commands.push(Command::PromoteFile {
+                path: filename,
+                target_level: self.min_level,
+            });
+
+            // Truncate the log file and replace the existing handle
+            self.log = OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(self.directory.join("nursery.log"))?;
+        }
+
+        // Trigger incremental merge
+        let min_steps_to_merge = min_level_size / 2;
+        if self.step + 1 >= min_steps_to_merge {
+            commands.push(Command::Merge {
+                steps: self.step + 1,
+                target_level: self.min_level,
+            });
+            self.step = 0;
+        } else {
+            self.step += 1;
+        }
+        Ok(commands)
     }
 
-    fn recover(log_file: impl AsRef<Path>) -> Result<()> {
+    fn recover(log_file: impl AsRef<Path>, target_level: u32) -> Result<Option<Command>> {
         if !log_file.as_ref().exists() {
-            return Ok(());
+            return Ok(None);
         }
 
         let file = OpenOptions::new().read(true).open(&log_file)?;
@@ -106,19 +155,24 @@ impl Nursery {
         }
 
         // Write out nursery.data from the recovered log
-        if !data.is_empty() {
+        let command = if !data.is_empty() {
             let mut data_file = log_file.as_ref().to_path_buf();
             data_file.set_file_name("nursery.data");
-            let mut writer = Writer::new(data_file)?;
+            let mut writer = Writer::new(&data_file)?;
             for (_, entry) in data.into_iter() {
                 writer.add(entry)?;
             }
             writer.close()?;
-        }
 
-        // TODO: Inject nursery.data into the first level
+            Some(Command::PromoteFile {
+                path: data_file,
+                target_level,
+            })
+        } else {
+            None
+        };
 
         remove_file(log_file)?;
-        Ok(())
+        Ok(command)
     }
 }

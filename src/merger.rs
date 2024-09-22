@@ -25,7 +25,7 @@ impl std::fmt::Debug for Merger {
 impl Merger {
     pub(crate) fn new(
         path: impl AsRef<Path>,
-        level: usize,
+        level: u32,
         a_tree: &Tree,
         b_tree: &Tree,
     ) -> Result<Self> {

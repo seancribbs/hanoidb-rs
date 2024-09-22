@@ -3,6 +3,7 @@ use std::path::Path;
 use error::Result;
 use nursery::Nursery;
 
+mod db;
 mod error;
 mod format;
 mod level;
@@ -13,7 +14,7 @@ mod writer;
 fn main() -> Result<()> {
     let dir = std::env::args().nth(1).expect("required directory to read");
     println!("==============\n CREATING NURSERY:");
-    let nursery = Nursery::new(&dir, 10, 25)?;
+    let nursery = Nursery::new(&dir, 10)?;
     let mut nursery_data = Path::new(&dir).to_path_buf();
     nursery_data.push("nursery.data");
     if nursery_data.exists() {

@@ -132,9 +132,10 @@ pub struct OwnedTreeEntryIterator {
 
 impl OwnedTreeEntryIterator {
     fn new(tree: Tree) -> Result<Self> {
+        let root_iter = tree.root_block()?.entries_owned()?;
         Ok(Self {
             tree,
-            levels: vec![tree.root_block()?.entries_owned()?],
+            levels: vec![root_iter],
         })
     }
 }
@@ -151,7 +152,8 @@ impl Iterator for OwnedTreeEntryIterator {
                         .tree
                         .block_from_poslen_entry(&entry)
                         .ok()?
-                        .entries_owned()?;
+                        .entries_owned()
+                        .ok()?;
                     self.levels.push(block_iterator);
                     continue;
                 }
