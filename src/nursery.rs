@@ -24,7 +24,7 @@ pub struct Nursery {
     data: NurseryData,
     min_level: u32,
     total_size: usize,
-    step: i32,
+    step: usize,
     merge_done: usize,
 }
 
@@ -84,7 +84,7 @@ impl Nursery {
 
         // Check if the in-memory data is big enough to promote to the next level
         let min_level_size = 1 << self.min_level;
-        if self.data.len() >= min_level_size as usize {
+        if self.data.len() >= min_level_size {
             let filename = self.directory.join("nursery.data");
             let mut writer = Writer::new(&filename)?;
             let data = std::mem::take(&mut self.data);

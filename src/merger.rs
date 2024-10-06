@@ -10,15 +10,11 @@ pub struct Merger {
     a: Peekable<OwnedTreeEntryIterator>,
     b: Peekable<OwnedTreeEntryIterator>,
     x: Writer,
-    n: usize,
 }
 
 impl std::fmt::Debug for Merger {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Merger")
-            .field("writer", &self.x)
-            .field("n", &self.n)
-            .finish()
+        f.debug_struct("Merger").field("writer", &self.x).finish()
     }
 }
 
@@ -33,19 +29,21 @@ impl Merger {
         let b = b_tree.entries_owned()?.peekable();
         let xfile = path.as_ref().to_path_buf().join(format!("X-{level}.data"));
         let x = Writer::new(&xfile)?;
-        Ok(Self { a, b, x, n: 0 })
+        Ok(Self { a, b, x })
     }
 
-    pub(crate) fn incremental_merge(mut self, work: usize) -> Result<Option<Self>> {
-        self.n += work;
-        while self.n > 0 {
+    pub(crate) fn incremental_merge(mut self, work: usize) -> Result<MergeOutcome> {
+        for i in 0..work {
             let step = self.merge_step()?;
             if step == 0 {
-                return self.x.close().map(|_| None);
+                let count = self.x.count();
+                return self.x.close().map(|_| MergeOutcome::Complete {
+                    count,
+                    steps: i + 1,
+                });
             }
-            self.n = self.n.saturating_sub(step);
         }
-        Ok(Some(self))
+        Ok(MergeOutcome::Continue(self))
     }
 
     fn merge_step(&mut self) -> Result<usize> {
@@ -74,4 +72,9 @@ impl Merger {
             }
         }
     }
+}
+
+pub enum MergeOutcome {
+    Continue(Merger),
+    Complete { count: usize, steps: usize },
 }
