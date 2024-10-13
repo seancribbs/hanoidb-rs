@@ -15,7 +15,7 @@ pub struct Level {
 }
 
 impl Level {
-    pub(crate) fn new(path: impl AsRef<Path>, level: u32) -> Result<Self> {
+    pub fn new(path: impl AsRef<Path>, level: u32) -> Result<Self> {
         let path: PathBuf = path.as_ref().to_path_buf();
         let a_file = data_file_name(&path, level, "A");
         let a = a_file
@@ -44,19 +44,17 @@ impl Level {
         Ok(level)
     }
 
-    pub(crate) fn get_entry(&self, key: &[u8]) -> Result<Option<Entry>> {
-        for file in [&self.c, &self.b, &self.a] {
-            if let Some(tree) = file {
-                let entry = tree.get_entry(key)?;
-                if entry.is_some() {
-                    return Ok(entry);
-                }
+    pub fn get_entry(&self, key: &[u8]) -> Result<Option<Entry>> {
+        for tree in [&self.c, &self.b, &self.a].into_iter().flatten() {
+            let entry = tree.get_entry(key)?;
+            if entry.is_some() {
+                return Ok(entry);
             }
         }
         Ok(None)
     }
 
-    pub(crate) fn promote_file(&mut self, path: PathBuf) -> Result<Vec<Command>> {
+    pub fn promote_file(&mut self, path: PathBuf) -> Result<Vec<Command>> {
         if self.a.is_none() {
             let new_filename = self.data_file_name("A");
             std::fs::rename(&path, &new_filename)?;
@@ -75,7 +73,7 @@ impl Level {
         Ok(vec![])
     }
 
-    pub(crate) fn merge(
+    pub fn merge(
         &mut self,
         work_completed: usize,
         work_unit: usize,
@@ -204,6 +202,6 @@ fn data_file_name(path: &Path, level: u32, prefix: &str) -> PathBuf {
 }
 
 #[inline]
-pub(crate) fn level_size(level: u32) -> usize {
+pub fn level_size(level: u32) -> usize {
     1 << level as usize
 }

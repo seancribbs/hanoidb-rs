@@ -19,12 +19,7 @@ impl std::fmt::Debug for Merger {
 }
 
 impl Merger {
-    pub(crate) fn new(
-        path: impl AsRef<Path>,
-        level: u32,
-        a_tree: &Tree,
-        b_tree: &Tree,
-    ) -> Result<Self> {
+    pub fn new(path: impl AsRef<Path>, level: u32, a_tree: &Tree, b_tree: &Tree) -> Result<Self> {
         let a = a_tree.entries_owned()?.peekable();
         let b = b_tree.entries_owned()?.peekable();
         let xfile = path.as_ref().to_path_buf().join(format!("X-{level}.data"));
@@ -32,7 +27,7 @@ impl Merger {
         Ok(Self { a, b, x })
     }
 
-    pub(crate) fn incremental_merge(mut self, work: usize) -> Result<MergeOutcome> {
+    pub fn incremental_merge(mut self, work: usize) -> Result<MergeOutcome> {
         for i in 0..work {
             let step = self.merge_step()?;
             if step == 0 {
@@ -74,6 +69,14 @@ impl Merger {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
+// NOTE: We need to consume the merger when its work is complete, but if
+// it is incomplete, it should continue to persist. Therefore, we suppress
+// the large enum variant warning to allow it to be threaded through.
+//
+// The other option is to pass a smart pointer of some sort (Option<Merger>?) to
+// the incremental_merge method so that the contents can be consumed when the merge
+// finishes.
 pub enum MergeOutcome {
     Continue(Merger),
     Complete { count: usize, steps: usize },

@@ -80,6 +80,8 @@ impl Tree {
         })
     }
 
+    #[allow(dead_code)]
+    // TODO: Use this for full-database folds/scans
     pub fn entries(&self) -> Result<TreeEntryIterator<'_>> {
         TreeEntryIterator::new(self)
     }
@@ -89,6 +91,8 @@ impl Tree {
     }
 
     pub fn get_entry(&self, key: &[u8]) -> Result<Option<Entry>> {
+        // TODO: read the bloom filter and bail early if
+        // it's not in the file
         let mut block = self.root_block()?;
         loop {
             // level > 0 -> inner block
@@ -111,42 +115,6 @@ impl Tree {
                 }
             } else {
                 return Ok(block.entries().find(|entry| entry.key() == key));
-            }
-        }
-    }
-
-    pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
-        // TODO: read the bloom filter and bail early if
-        // it's not in the file
-        let mut block = self.root_block().ok()?;
-        loop {
-            // level > 0 -> inner block
-            // level == 0 -> leaf block
-            if block.level > 0 {
-                let entry = block
-                    .entries()
-                    .take_while(|e| {
-                        !matches!(e, Entry::PosLen {
-                            key: first_key,
-                            ..
-                        } if key < first_key)
-                    })
-                    .last();
-                if let Some(inner_entry) = entry {
-                    // Go to the next lower level in the tree
-                    block = self.block_from_poslen_entry(&inner_entry).ok()?;
-                } else {
-                    return None;
-                }
-            } else {
-                return block.entries().find_map(|entry| match entry {
-                    Entry::KeyVal {
-                        key: found_key,
-                        value,
-                        ..
-                    } if key == found_key => Some(value),
-                    _ => None,
-                });
             }
         }
     }
@@ -294,6 +262,8 @@ pub struct Block<'a> {
     pub start: u64,
     pub blocklen: u32,
     pub level: u16,
+    #[allow(dead_code)]
+    // TODO: Implement compression on reads and writes
     pub compression: Compression,
     file: &'a File,
 }
@@ -369,7 +339,7 @@ pub enum Entry {
 }
 
 impl Entry {
-    pub(crate) fn key(&self) -> &[u8] {
+    pub fn key(&self) -> &[u8] {
         match self {
             Entry::KeyVal { key, .. } | Entry::Deleted { key, .. } | Entry::PosLen { key, .. } => {
                 key.as_slice()
@@ -377,7 +347,7 @@ impl Entry {
         }
     }
 
-    pub(crate) fn read(mut file: &File) -> Result<(Self, u64)> {
+    pub fn read(mut file: &File) -> Result<(Self, u64)> {
         let mut header = vec![0; 8];
         file.read_exact(&mut header).map_err(|err| {
             if err.kind() == ErrorKind::UnexpectedEof {
@@ -511,7 +481,7 @@ impl Entry {
         entry
     }
 
-    pub(crate) fn encoded_size(&self) -> usize {
+    pub fn encoded_size(&self) -> usize {
         // entry len + crc32 + trailing TAG_END
         9 + match self {
             Entry::KeyVal {

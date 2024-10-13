@@ -44,7 +44,7 @@ impl std::fmt::Debug for Writer {
 }
 
 impl Writer {
-    pub(crate) fn new(name: impl AsRef<Path>) -> Result<Self> {
+    pub fn new(name: impl AsRef<Path>) -> Result<Self> {
         let mut index_file = OpenOptions::new()
             .append(true)
             .create_new(true)
@@ -63,16 +63,16 @@ impl Writer {
         })
     }
 
-    pub(crate) fn count(&self) -> usize {
+    pub fn count(&self) -> usize {
         self.value_count + self.tombstone_count
     }
 
-    pub(crate) fn add(&mut self, entry: Entry) -> Result<()> {
+    pub fn add(&mut self, entry: Entry) -> Result<()> {
         self.append_to_block(0, entry)?;
         Ok(())
     }
 
-    pub(crate) fn close(mut self) -> Result<()> {
+    pub fn close(mut self) -> Result<()> {
         // Unwritten blocks: call flush_block_buffer to write them
         while let Some(block) = self.blocks.last() {
             // 1 block with 1 entry in it where level is not 0, discard that block

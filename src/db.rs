@@ -81,6 +81,11 @@ impl HanoiDB {
         self.handle_commands(commands)
     }
 
+    /// Returns the directory that contains this database's files.
+    pub fn path(&self) -> &Path {
+        self.path.as_ref()
+    }
+
     fn handle_commands(&mut self, commands: Vec<Command>) -> Result<()> {
         let mut commands = VecDeque::from(commands);
         while let Some(command) = commands.pop_front() {
@@ -126,7 +131,7 @@ impl HanoiDB {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Command {
+pub enum Command {
     PromoteFile { path: PathBuf, target_level: u32 },
     Merge { steps: usize, target_level: u32 },
 }

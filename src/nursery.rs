@@ -9,7 +9,7 @@ use crate::format::Entry;
 use crate::writer::Writer;
 
 #[derive(Debug, Clone)]
-pub(crate) enum Value {
+pub enum Value {
     Plain(Vec<u8>),
     // Timestampped(Vec<u8>, time value?)
     Deleted,
@@ -25,7 +25,6 @@ pub struct Nursery {
     min_level: u32,
     total_size: usize,
     step: usize,
-    merge_done: usize,
 }
 
 impl Nursery {
@@ -45,7 +44,6 @@ impl Nursery {
                 min_level,
                 total_size: 0,
                 step: 0,
-                merge_done: 0,
             },
             recovery,
         ))
