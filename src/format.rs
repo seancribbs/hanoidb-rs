@@ -88,6 +88,33 @@ impl Tree {
         OwnedTreeEntryIterator::new(self.try_clone()?)
     }
 
+    pub fn get_entry(&self, key: &[u8]) -> Result<Option<Entry>> {
+        let mut block = self.root_block()?;
+        loop {
+            // level > 0 -> inner block
+            // level == 0 -> leaf block
+            if block.level > 0 {
+                let entry = block
+                    .entries()
+                    .take_while(|e| {
+                        !matches!(e, Entry::PosLen {
+                            key: first_key,
+                            ..
+                        } if key < first_key)
+                    })
+                    .last();
+                if let Some(inner_entry) = entry {
+                    // Go to the next lower level in the tree
+                    block = self.block_from_poslen_entry(&inner_entry)?;
+                } else {
+                    return Ok(None);
+                }
+            } else {
+                return Ok(block.entries().find(|entry| entry.key() == key));
+            }
+        }
+    }
+
     pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
         // TODO: read the bloom filter and bail early if
         // it's not in the file

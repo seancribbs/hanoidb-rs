@@ -2,9 +2,11 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use crate::error::*;
+use crate::format::Entry;
 use crate::level::{level_size, Level};
-use crate::nursery::Nursery;
+use crate::nursery::{Nursery, Value};
 
+/// A HanoiDB instance wrapping a directory of files.
 pub struct HanoiDB {
     path: PathBuf,
     nursery: Nursery,
@@ -14,10 +16,14 @@ pub struct HanoiDB {
 }
 
 impl HanoiDB {
+    /// Opens a directory as a HanoiDB instance with
+    /// the default minimum level as 10 and maximum level as 25.
+    /// Equivalent to `HanoiDB::open_with_min_and_max_levels(path, 10, 25)`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_min_and_max_levels(path, 10, 25)
     }
 
+    /// Opens a directory as a HanoiDB instance with the given min and max levels.
     pub fn open_with_min_and_max_levels(
         path: impl AsRef<Path>,
         min_level: u32,
@@ -41,6 +47,38 @@ impl HanoiDB {
             assert!(commands.is_empty());
         }
         Ok(db)
+    }
+
+    /// Looks up a key in the database and returns its value if it is present.
+    pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
+        //    - check the nursery first for the key
+        match self.nursery.get_value(key) {
+            Some(Value::Deleted) => return Ok(None),
+            Some(Value::Plain(value)) => return Ok(Some(value.clone())),
+            None => (),
+        }
+        //    - check the levels in order until you find it or a tombstone
+        for level in &self.levels {
+            match level.get_entry(key)? {
+                Some(Entry::Deleted { .. }) => return Ok(None),
+                Some(Entry::KeyVal { value, .. }) => return Ok(Some(value)),
+                Some(Entry::PosLen { .. }) => unreachable!("get entry returned a poslen entry"),
+                None => (),
+            }
+        }
+        Ok(None)
+    }
+
+    /// Inserts a key-value pair into the database.
+    pub fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+        let commands = self.nursery.add(key, value)?;
+        self.handle_commands(commands)
+    }
+
+    /// Deletes a key from the database.
+    pub fn delete(&mut self, key: Vec<u8>) -> Result<()> {
+        let commands = self.nursery.delete(key)?;
+        self.handle_commands(commands)
     }
 
     fn handle_commands(&mut self, commands: Vec<Command>) -> Result<()> {

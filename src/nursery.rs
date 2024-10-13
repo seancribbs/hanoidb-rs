@@ -9,7 +9,7 @@ use crate::format::Entry;
 use crate::writer::Writer;
 
 #[derive(Debug, Clone)]
-enum Value {
+pub(crate) enum Value {
     Plain(Vec<u8>),
     // Timestampped(Vec<u8>, time value?)
     Deleted,
@@ -51,6 +51,10 @@ impl Nursery {
         ))
     }
 
+    pub fn get_value(&self, key: &[u8]) -> Option<&Value> {
+        self.data.get(key)
+    }
+
     pub fn add(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<Vec<Command>> {
         let bin_entry = Entry::KeyVal {
             key: key.clone(),
@@ -61,7 +65,7 @@ impl Nursery {
         self.write_internal(key, Value::Plain(value), bin_entry)
     }
 
-    pub fn remove(&mut self, key: Vec<u8>) -> Result<Vec<Command>> {
+    pub fn delete(&mut self, key: Vec<u8>) -> Result<Vec<Command>> {
         let bin_entry = Entry::Deleted {
             key: key.clone(),
             timestamp: None,

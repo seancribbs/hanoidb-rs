@@ -44,6 +44,18 @@ impl Level {
         Ok(level)
     }
 
+    pub(crate) fn get_entry(&self, key: &[u8]) -> Result<Option<Entry>> {
+        for file in [&self.c, &self.b, &self.a] {
+            if let Some(tree) = file {
+                let entry = tree.get_entry(key)?;
+                if entry.is_some() {
+                    return Ok(entry);
+                }
+            }
+        }
+        Ok(None)
+    }
+
     pub(crate) fn promote_file(&mut self, path: PathBuf) -> Result<Vec<Command>> {
         if self.a.is_none() {
             let new_filename = self.data_file_name("A");
@@ -77,6 +89,7 @@ impl Level {
             // Compute how many steps to take in this merge
 
             // TODO: track how much was actually done previously
+            // Put this in the merger?
             let work_left_here = level_size(self.level) * 2;
             // TODO: can self.level ever be greater than max_level as configured?
             // let max_level = max_level.max(self.level);
@@ -153,8 +166,15 @@ impl Level {
             }
             Ok(commands)
         } else {
-            // TODO: Propagate the steps to the next level?
-            Ok(vec![])
+            let commands = if self.level < max_level {
+                vec![Command::Merge {
+                    steps: work_completed,
+                    target_level: self.level + 1,
+                }]
+            } else {
+                vec![]
+            };
+            Ok(commands)
         }
     }
 
