@@ -1,1 +1,2 @@
-
+- [ ] Recover files left in the merged-but-not-promoted state
+- [ ] Recover files in the incomplete non-promotion state (B and C? and M but not A)
