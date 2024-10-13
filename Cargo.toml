@@ -7,3 +7,6 @@ edition = "2021"
 crc32fast = "1.4.2"
 derive_more = { version = "1.0.0", features = ["is_variant"] }
 thiserror = "1.0.63"
+
+[dev-dependencies]
+tempfile = "3.13.0"
