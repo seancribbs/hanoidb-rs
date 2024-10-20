@@ -319,7 +319,7 @@ impl<'a> Block<'a> {
     }
 }
 
-#[derive(Debug, Clone, derive_more::IsVariant)]
+#[derive(Debug, Clone, derive_more::IsVariant, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum Entry {
     KeyVal {

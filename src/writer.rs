@@ -180,3 +180,46 @@ impl Writer {
         self.blocks.last_mut().unwrap()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::format::Tree;
+    use tempfile::tempdir;
+
+    // Roundtrip - write some values to a file and read the file back
+    #[test]
+    fn roundtrip() {
+        let dir = tempdir().unwrap();
+        let data = dir.as_ref().join("test.data");
+        let deleted_key = "deleted".to_owned().into_bytes();
+        let key = "key".to_owned().into_bytes();
+        let value = "value".to_owned().into_bytes();
+
+        let deleted = Entry::Deleted {
+            key: deleted_key.clone(),
+            timestamp: None,
+        };
+        let kv = Entry::KeyVal {
+            key: key.clone(),
+            value: value.clone(),
+            timestamp: None,
+        };
+        let mut writer = Writer::new(&data).unwrap();
+
+        writer.add(deleted.clone()).unwrap();
+        writer.add(kv.clone()).unwrap();
+        writer.close().unwrap();
+
+        let tree = Tree::from_file(&data).unwrap();
+        assert_eq!(tree.get_entry(&key).unwrap(), Some(kv));
+        let entries: Vec<_> = tree.entries_owned().unwrap().collect();
+        dbg!(&entries);
+        assert_eq!(tree.get_entry(&deleted_key).unwrap(), Some(deleted));
+    }
+    // Writes must be in byte-lexical order
+    // Values and tombstone counts are tracked correctly
+    // Blocks are closed when they reach 8KB
+    // Solo inner nodes are pruned on close
+    // Write an empty file
+}
