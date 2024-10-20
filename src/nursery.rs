@@ -8,7 +8,7 @@ use crate::error::*;
 use crate::format::Entry;
 use crate::writer::Writer;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
     Plain(Vec<u8>),
     // Timestampped(Vec<u8>, time value?)
@@ -176,5 +176,186 @@ impl Nursery {
 
         remove_file(log_file)?;
         Ok(command)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    const MIN_LEVEL: u32 = 10;
+    use super::*;
+    use tempfile::tempdir;
+
+    // Creating a new one without recovery
+    #[test]
+    fn fresh_nursery() {
+        let dir = tempdir().unwrap();
+        let (nursery, command) = Nursery::new(&dir, MIN_LEVEL).unwrap();
+        assert!(command.is_none(), "fresh nursery wasn't empty");
+        let recovery_data = dir.as_ref().join("nursery.data");
+        let log = dir.as_ref().join("nursery.log");
+        assert!(
+            !std::fs::exists(recovery_data).unwrap(),
+            "recovery data was written on fresh nursery"
+        );
+        assert_eq!(nursery.total_size, 0);
+        assert!(nursery.data.is_empty());
+        assert_eq!(0, std::fs::metadata(&log).unwrap().len());
+    }
+
+    // Recovering an existing nursery (just a log)
+    #[test]
+    fn recover_nursery() {
+        let dir = tempdir().unwrap();
+        let recovery_data = dir.as_ref().join("nursery.data");
+        let log = dir.as_ref().join("nursery.log");
+        // Create a nursery and immediately drop it, leaving data in its log.
+        {
+            let (mut nursery, _) = Nursery::new(&dir, MIN_LEVEL).unwrap();
+            let commands = nursery
+                .add("key".as_bytes().to_owned(), "value".as_bytes().to_owned())
+                .unwrap();
+            assert!(commands.is_empty());
+        }
+        let (nursery, command) = Nursery::new(&dir, MIN_LEVEL).unwrap();
+        assert!(
+            std::fs::exists(&recovery_data).unwrap(),
+            "recovery data was not written for fresh nursery"
+        );
+        assert_eq!(
+            command,
+            Some(Command::PromoteFile {
+                path: recovery_data,
+                target_level: 10
+            })
+        );
+        assert_eq!(nursery.total_size, 0);
+        assert!(nursery.data.is_empty());
+        assert_eq!(0, std::fs::metadata(&log).unwrap().len());
+    }
+
+    // Write a KV pair and read it back
+    #[test]
+    fn write_and_read() {
+        let dir = tempdir().unwrap();
+        let log = dir.as_ref().join("nursery.log");
+        let key = "key".as_bytes().to_owned();
+        let value = "value".as_bytes().to_owned();
+        let (mut nursery, _) = Nursery::new(&dir, MIN_LEVEL).unwrap();
+        let commands = nursery.add(key.clone(), value.clone()).unwrap();
+        assert!(
+            commands.is_empty(),
+            "empty nursery should not cause merges or promotions after one key is inserted"
+        );
+        assert_ne!(
+            0,
+            std::fs::metadata(&log).unwrap().len(),
+            "nursery log was not written to"
+        );
+        assert_ne!(0, nursery.total_size);
+        assert_eq!(Some(&Value::Plain(value)), nursery.get_value(&key));
+    }
+
+    // Delete a key and read it back
+    #[test]
+    fn delete_and_read() {
+        let dir = tempdir().unwrap();
+        let log = dir.as_ref().join("nursery.log");
+        let key = "key".as_bytes().to_owned();
+        let (mut nursery, _) = Nursery::new(&dir, MIN_LEVEL).unwrap();
+        let commands = nursery.delete(key.clone()).unwrap();
+        assert!(
+            commands.is_empty(),
+            "empty nursery should not cause merges or promotions after one key is inserted"
+        );
+        assert_ne!(
+            0,
+            std::fs::metadata(&log).unwrap().len(),
+            "nursery log was not written to"
+        );
+        assert_ne!(0, nursery.total_size);
+        assert_eq!(Some(&Value::Deleted), nursery.get_value(&key));
+    }
+
+    // Writing enough values to force merging
+    #[test]
+    fn trigger_incremental_merge() {
+        let dir = tempdir().unwrap();
+        let log = dir.as_ref().join("nursery.log");
+        let (mut nursery, _) = Nursery::new(&dir, MIN_LEVEL).unwrap();
+        let mut commands = vec![];
+        // Write 512 KV pairs into the nursery, triggering
+        // incremental merge at 1/2 the smallest level size
+        for i in 0..512 {
+            let key = format!("key-{i}").into_bytes();
+            let value = format!("value-{i}").into_bytes();
+            let step_commands = nursery.add(key, value).unwrap();
+            commands.extend(step_commands);
+        }
+        assert_ne!(
+            0,
+            std::fs::metadata(&log).unwrap().len(),
+            "nursery log was not written to"
+        );
+        assert_ne!(0, nursery.total_size);
+        assert_eq!(1, commands.len(), "should have produced a merge");
+        assert_eq!(
+            commands[0],
+            Command::Merge {
+                steps: 512,
+                target_level: 10
+            }
+        );
+    }
+
+    // Writing enough values to force promotion
+    #[test]
+    fn trigger_promotion() {
+        let dir = tempdir().unwrap();
+        let log = dir.as_ref().join("nursery.log");
+        let data = dir.as_ref().join("nursery.data");
+
+        let (mut nursery, _) = Nursery::new(&dir, MIN_LEVEL).unwrap();
+        let mut commands = vec![];
+        // Write 1024 KV pairs into the nursery, triggering promotion
+        // of the nursery data into the first level
+        for i in 0..1024 {
+            let key = format!("key-{i}").into_bytes();
+            let value = format!("value-{i}").into_bytes();
+            let step_commands = nursery.add(key, value).unwrap();
+            commands.extend(step_commands);
+        }
+        assert_eq!(
+            0,
+            std::fs::metadata(&log).unwrap().len(),
+            "nursery log was not truncated after data promotion"
+        );
+        assert_ne!(
+            0,
+            std::fs::metadata(&data).unwrap().len(),
+            "nursery data file for promotion was empty"
+        );
+        assert_ne!(0, nursery.total_size);
+        assert_eq!(
+            3,
+            commands.len(),
+            "should have produced two merges and a promotion"
+        );
+        assert_eq!(
+            commands,
+            [
+                Command::Merge {
+                    steps: 512,
+                    target_level: 10
+                },
+                Command::PromoteFile {
+                    path: data.clone(),
+                    target_level: 10
+                },
+                Command::Merge {
+                    steps: 512,
+                    target_level: 10
+                },
+            ]
+        );
     }
 }

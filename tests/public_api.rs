@@ -8,7 +8,6 @@ fn read_empty_database() {
     let db = HanoiDB::open(&dir).unwrap();
     let value = db.get("key".as_bytes()).unwrap();
     assert!(value.is_none());
-    dir.close().unwrap();
 }
 
 #[test]
@@ -19,7 +18,6 @@ fn insert_kv_pair() {
     let value = String::from("value").into_bytes();
     db.insert(key.clone(), value.clone()).unwrap();
     assert_eq!(db.get(&key).unwrap(), Some(value));
-    dir.close().unwrap();
 }
 
 #[test]
@@ -32,7 +30,6 @@ fn insert_and_delete() {
     assert_eq!(db.get(&key).unwrap(), Some(value));
     db.delete(key.clone()).unwrap();
     assert_eq!(db.get(&key).unwrap(), None);
-    dir.close().unwrap();
 }
 
 #[test]
@@ -48,7 +45,6 @@ fn open_existing_dir() {
     }
     let db = HanoiDB::open(&dir).unwrap();
     assert_eq!(db.get(&key).unwrap(), Some(value));
-    dir.close().unwrap();
 }
 
 #[test]
@@ -60,5 +56,4 @@ fn lots_of_entries() {
         let value = format!("value-{i}").into_bytes();
         db.insert(key, value).unwrap();
     }
-    dir.close().unwrap();
 }

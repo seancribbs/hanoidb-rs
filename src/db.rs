@@ -130,7 +130,7 @@ impl HanoiDB {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     PromoteFile { path: PathBuf, target_level: u32 },
     Merge { steps: usize, target_level: u32 },
