@@ -394,8 +394,7 @@ impl Entry {
                 }
             }
             TAG_DELETED => {
-                // let keylen = u32::from_be_bytes(entry_data[1..5].try_into()?);
-                let key = entry_data.split_off(5);
+                let key = entry_data.split_off(1);
                 Self::Deleted {
                     key,
                     timestamp: None,
@@ -403,8 +402,7 @@ impl Entry {
             }
             TAG_DELETED2 => {
                 let timestamp = u32::from_be_bytes(entry_data[1..5].try_into()?);
-                // let keylen = u32::from_be_bytes(entry_data[5..9].try_into()?);
-                let key = entry_data.split_off(9);
+                let key = entry_data.split_off(5);
                 Self::Deleted {
                     key,
                     timestamp: Some(timestamp),

@@ -213,10 +213,9 @@ mod tests {
 
         let tree = Tree::from_file(&data).unwrap();
         assert_eq!(tree.get_entry(&key).unwrap(), Some(kv));
-        let entries: Vec<_> = tree.entries_owned().unwrap().collect();
-        dbg!(&entries);
         assert_eq!(tree.get_entry(&deleted_key).unwrap(), Some(deleted));
     }
+
     // Writes must be in byte-lexical order
     // Values and tombstone counts are tracked correctly
     // Blocks are closed when they reach 8KB
