@@ -182,7 +182,7 @@ impl Writer {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::format::Tree;
     use tempfile::tempdir;
@@ -290,7 +290,7 @@ mod tests {
         assert_eq!(writer.blocks[0].members.len(), 2);
     }
 
-    fn write_8kb(writer: &mut Writer, mut key: u64) -> Result<u64> {
+    pub fn write_8kb(writer: &mut Writer, mut key: u64) -> Result<u64> {
         let mut written: usize = 0;
         while written < 8192 {
             let entry = Entry::KeyVal {

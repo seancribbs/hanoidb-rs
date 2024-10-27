@@ -81,3 +81,174 @@ pub enum MergeOutcome {
     Continue(Merger),
     Complete { count: usize, steps: usize },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::format::{Entry, Tree};
+    use crate::writer::tests::write_8kb;
+    use tempfile::tempdir;
+
+    // Completed incremental merge returns Complete and consumes the merger
+    #[test]
+    fn complete_incremental_merge() {
+        let dir = tempdir().unwrap();
+
+        // "A"
+        let a_data = dir.as_ref().join("A-10.data");
+        let mut a_writer = Writer::new(&a_data).unwrap();
+        a_writer
+            .add(Entry::KeyVal {
+                key: "a".as_bytes().to_vec(),
+                value: "a_value".as_bytes().to_vec(),
+                timestamp: None,
+            })
+            .unwrap();
+        a_writer.close().unwrap();
+
+        // "B"
+        let b_data = dir.as_ref().join("B-10.data");
+        let mut b_writer = Writer::new(&b_data).unwrap();
+        b_writer
+            .add(Entry::KeyVal {
+                key: "b".as_bytes().to_vec(),
+                value: "b_value".as_bytes().to_vec(),
+                timestamp: None,
+            })
+            .unwrap();
+        b_writer.close().unwrap();
+
+        // Open the trees and do a complete merge
+        let a_tree = Tree::from_file(&a_data).unwrap();
+        let b_tree = Tree::from_file(&b_data).unwrap();
+        let merger = Merger::new(&dir, 10, &a_tree, &b_tree).unwrap();
+
+        let result = merger.incremental_merge(512).unwrap();
+        let MergeOutcome::Complete { count, steps } = result else {
+            panic!("merge did not complete");
+        };
+        assert_eq!(count, 2);
+        assert_eq!(steps, 3); // TODO: does this value make sense?
+        assert!(std::fs::exists(dir.as_ref().join("X-10.data")).unwrap());
+    }
+
+    // Incomplete incremental merges return Continue
+    #[test]
+    fn incomplete_merge() {
+        let dir = tempdir().unwrap();
+
+        // "A"
+        let a_data = dir.as_ref().join("A-10.data");
+        let mut a_writer = Writer::new(&a_data).unwrap();
+        let _a_end = write_8kb(&mut a_writer, 0).unwrap();
+        a_writer.close().unwrap();
+
+        // "B"
+        let b_data = dir.as_ref().join("B-10.data");
+        let mut b_writer = Writer::new(&b_data).unwrap();
+        let _b_end = write_8kb(&mut b_writer, 0).unwrap();
+        b_writer.close().unwrap();
+
+        // Open the trees and do an incomplete merge
+        let a_tree = Tree::from_file(&a_data).unwrap();
+        let b_tree = Tree::from_file(&b_data).unwrap();
+        let merger = Merger::new(&dir, 10, &a_tree, &b_tree).unwrap();
+
+        let result = merger.incremental_merge(1).unwrap();
+        assert!(matches!(result, MergeOutcome::Continue(_)));
+    }
+
+    // Completed merge with disjoint keysets results in a merged file with all keys
+    #[test]
+    fn complete_merge_with_disjoint_keys() {
+        let dir = tempdir().unwrap();
+
+        // "A"
+        let a_data = dir.as_ref().join("A-10.data");
+        let mut a_writer = Writer::new(&a_data).unwrap();
+        let a_key = "a".as_bytes().to_vec();
+        a_writer
+            .add(Entry::KeyVal {
+                key: a_key.clone(),
+                value: "a_value".as_bytes().to_vec(),
+                timestamp: None,
+            })
+            .unwrap();
+        a_writer.close().unwrap();
+
+        // "B"
+        let b_data = dir.as_ref().join("B-10.data");
+        let mut b_writer = Writer::new(&b_data).unwrap();
+        let b_key = "b".as_bytes().to_vec();
+        b_writer
+            .add(Entry::KeyVal {
+                key: b_key.clone(),
+                value: "b_value".as_bytes().to_vec(),
+                timestamp: None,
+            })
+            .unwrap();
+        b_writer.close().unwrap();
+
+        // Open the trees and do a complete merge
+        let a_tree = Tree::from_file(&a_data).unwrap();
+        let b_tree = Tree::from_file(&b_data).unwrap();
+        let merger = Merger::new(&dir, 10, &a_tree, &b_tree).unwrap();
+
+        let result = merger.incremental_merge(512).unwrap();
+        assert!(matches!(result, MergeOutcome::Complete { .. }));
+
+        let x_tree = Tree::from_file(dir.as_ref().join("X-10.data")).unwrap();
+        assert!(x_tree.get_entry(&a_key).unwrap().is_some());
+        assert!(x_tree.get_entry(&b_key).unwrap().is_some());
+    }
+
+    // Merging overlapping keysets prefers the new file ("B")
+    #[test]
+    fn complete_merge_with_overlapping() {
+        let dir = tempdir().unwrap();
+
+        // "A"
+        let a_data = dir.as_ref().join("A-10.data");
+        let mut a_writer = Writer::new(&a_data).unwrap();
+        let a_key = "a".as_bytes().to_vec();
+        a_writer
+            .add(Entry::KeyVal {
+                key: a_key.clone(),
+                value: "a_value".as_bytes().to_vec(),
+                timestamp: None,
+            })
+            .unwrap();
+        a_writer.close().unwrap();
+
+        // "B"
+        let b_data = dir.as_ref().join("B-10.data");
+        let mut b_writer = Writer::new(&b_data).unwrap();
+        let b_value = "b_value".as_bytes().to_vec();
+        b_writer
+            .add(Entry::KeyVal {
+                key: a_key.clone(),
+                value: b_value.clone(),
+                timestamp: None,
+            })
+            .unwrap();
+        b_writer.close().unwrap();
+
+        // Open the trees and do a complete merge
+        let a_tree = Tree::from_file(&a_data).unwrap();
+        let b_tree = Tree::from_file(&b_data).unwrap();
+        let merger = Merger::new(&dir, 10, &a_tree, &b_tree).unwrap();
+
+        let result = merger.incremental_merge(512).unwrap();
+        assert!(matches!(result, MergeOutcome::Complete { .. }));
+
+        let x_tree = Tree::from_file(dir.as_ref().join("X-10.data")).unwrap();
+        assert_eq!(
+            x_tree.get_entry(&a_key).unwrap().unwrap(),
+            Entry::KeyVal {
+                key: a_key,
+                value: b_value,
+                timestamp: None
+            }
+        );
+    }
+}
