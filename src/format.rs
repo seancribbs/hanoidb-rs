@@ -204,7 +204,7 @@ impl<'a> Iterator for TreeEntryIterator<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Trailer {
     bloom: Vec<u8>,
     bloom_len: u32,

@@ -217,8 +217,140 @@ mod tests {
     }
 
     // Writes must be in byte-lexical order
+    #[test]
+    fn writes_are_in_byte_order() {
+        let dir = tempdir().unwrap();
+        let data = dir.as_ref().join("test.data");
+        let deleted_key = "deleted".to_owned().into_bytes();
+        let key = "key".to_owned().into_bytes();
+        let value = "value".to_owned().into_bytes();
+
+        let deleted = Entry::Deleted {
+            key: deleted_key.clone(),
+            timestamp: None,
+        };
+        let kv = Entry::KeyVal {
+            key: key.clone(),
+            value: value.clone(),
+            timestamp: None,
+        };
+        let mut writer = Writer::new(&data).unwrap();
+
+        // These writes are out of order
+        writer.add(kv.clone()).unwrap();
+        let error = writer.add(deleted.clone()).unwrap_err();
+        assert_eq!(error.to_string(), "out-of-order write");
+    }
+
     // Values and tombstone counts are tracked correctly
+    #[test]
+    fn key_counts() {
+        let dir = tempdir().unwrap();
+        let data = dir.as_ref().join("test.data");
+        let deleted_key = "deleted".to_owned().into_bytes();
+        let key = "key".to_owned().into_bytes();
+        let value = "value".to_owned().into_bytes();
+
+        let deleted = Entry::Deleted {
+            key: deleted_key.clone(),
+            timestamp: None,
+        };
+        let kv = Entry::KeyVal {
+            key: key.clone(),
+            value: value.clone(),
+            timestamp: None,
+        };
+        let mut writer = Writer::new(&data).unwrap();
+
+        writer.add(deleted.clone()).unwrap();
+        assert_eq!(writer.count(), 1);
+        assert_eq!(writer.tombstone_count, 1);
+        assert_eq!(writer.value_count, 0);
+        writer.add(kv.clone()).unwrap();
+        assert_eq!(writer.count(), 2);
+        assert_eq!(writer.tombstone_count, 1);
+        assert_eq!(writer.value_count, 1);
+        writer.close().unwrap();
+    }
+
     // Blocks are closed when they reach 8KB
+    #[test]
+    fn max_block_size_is_8kb() {
+        // write 8kb of data, and then check that an inner
+        // node of the btree was created
+        let dir = tempdir().unwrap();
+        let data = dir.as_ref().join("test.data");
+        let mut writer = Writer::new(&data).unwrap();
+        let key = write_8kb(&mut writer, 0).unwrap();
+        assert_eq!(writer.blocks.len(), 1);
+        assert!(writer.blocks[0].is_solo_inner_block());
+        let _ = write_8kb(&mut writer, key);
+        assert_eq!(writer.blocks.len(), 1);
+        assert_eq!(writer.blocks[0].level, 1);
+        assert_eq!(writer.blocks[0].members.len(), 2);
+    }
+
+    fn write_8kb(writer: &mut Writer, mut key: u64) -> Result<u64> {
+        let mut written: usize = 0;
+        while written < 8192 {
+            let entry = Entry::KeyVal {
+                key: key.to_be_bytes().to_vec(),
+                value: key.to_be_bytes().to_vec(),
+                timestamp: None,
+            };
+            let entry_size = entry.encoded_size();
+            writer.add(entry)?;
+            written += entry_size;
+            key += 1;
+        }
+        Ok(key)
+    }
+
     // Solo inner nodes are pruned on close
+    #[test]
+    fn inner_nodes_have_fanout_gt_1() {
+        // write 8kb of data, then close.
+        // write 8kb of data, and then check that an inner
+        // node of the btree was created
+        let dir = tempdir().unwrap();
+        let data = dir.as_ref().join("test.data");
+        let mut writer = Writer::new(&data).unwrap();
+        let _key = write_8kb(&mut writer, 0).unwrap();
+        assert_eq!(writer.blocks.len(), 1);
+        assert!(writer.blocks[0].is_solo_inner_block());
+        writer.close().unwrap();
+        // check the contents of the written file to make sure there isn't an
+        // inner node with a single entry
+        let tree = Tree::from_file(&data).unwrap();
+        let root = tree.root_block().unwrap();
+        assert_eq!(root.level, 0);
+        assert_eq!(root.start, 4);
+        assert!(root.blocklen >= 8192);
+    }
+
     // Write an empty file
+    #[test]
+    fn empty_file() {
+        let dir = tempdir().unwrap();
+        let data = dir.as_ref().join("test.data");
+        let writer = Writer::new(&data).unwrap();
+        writer.close().unwrap();
+        let contents = std::fs::read(&data).unwrap();
+        // magic - 4
+        // blocklen - 4
+        // level - 2
+        // pad - 4
+        // bloom_len - 4
+        // root_pos - 8
+        assert_eq!(contents.len(), 26);
+        assert_eq!(&contents[0..4], "HAN2".as_bytes()); // magic
+        assert_eq!(&contents[4..8], &[0, 0, 0, 0]); // blocklen = 0
+        assert_eq!(&contents[8..10], &[0, 0]); // level = 0
+        assert_eq!(&contents[10..14], &[0, 0, 0, 0]); // pad
+        assert_eq!(&contents[14..18], &[0, 0, 0, 0]); // bloom_len
+        assert_eq!(&contents[18..26], &[0, 0, 0, 0, 0, 0, 0, 4]); // root_pos
+
+        let _tree = Tree::from_file(&data).unwrap();
+        // TODO: Fix Block::from_start to accept empty blocks
+    }
 }
