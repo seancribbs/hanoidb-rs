@@ -12,6 +12,8 @@ const TAG_KV_DATA2: u8 = 0x84;
 const TAG_DELETED2: u8 = 0x85;
 pub const TAG_END: u8 = 0xFF;
 
+pub const MAGIC: &str = "HAN3";
+
 pub struct Tree {
     file: File,
     len: u64,
@@ -23,7 +25,7 @@ impl Tree {
         let len = file.metadata()?.len();
         let mut magic: Vec<u8> = vec![0; 4];
         file.read_exact(&mut magic)?;
-        if magic == "HAN2".as_bytes() {
+        if magic == MAGIC.as_bytes() {
             Ok(Self { file, len })
         } else {
             Err(Error::InvalidTreeFormat(magic))

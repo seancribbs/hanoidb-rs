@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::error::*;
-use crate::format::{Compression, Entry, Trailer, TAG_END};
+use crate::format::{Compression, Entry, Trailer, MAGIC, TAG_END};
 
 const BLOCK_SIZE: usize = 8 * 1024;
 const FIRST_BLOCK_POS: u64 = 4;
@@ -49,7 +49,7 @@ impl Writer {
             .append(true)
             .create_new(true)
             .open(name.as_ref())?;
-        index_file.write_all("HAN2".as_bytes())?;
+        index_file.write_all(MAGIC.as_bytes())?;
         Ok(Self {
             name: name.as_ref().to_path_buf(),
             index_file,
@@ -343,7 +343,7 @@ pub mod tests {
         // bloom_len - 4
         // root_pos - 8
         assert_eq!(contents.len(), 26);
-        assert_eq!(&contents[0..4], "HAN2".as_bytes()); // magic
+        assert_eq!(&contents[0..4], "HAN3".as_bytes()); // magic
         assert_eq!(&contents[4..8], &[0, 0, 0, 0]); // blocklen = 0
         assert_eq!(&contents[8..10], &[0, 0]); // level = 0
         assert_eq!(&contents[10..14], &[0, 0, 0, 0]); // pad
