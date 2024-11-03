@@ -88,8 +88,10 @@ impl Tree {
     }
 
     pub fn get_entry(&self, key: &[u8]) -> Result<Option<Entry>> {
-        // TODO: read the bloom filter and bail early if
-        // it's not in the file
+        if !self.trailer.bloom.contains(key) {
+            return Ok(None);
+        }
+
         let mut block = self.root_block()?;
         loop {
             // level > 0 -> inner block
