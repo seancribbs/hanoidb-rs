@@ -2,6 +2,8 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use fastbloom::BloomFilter;
+
 use crate::error::*;
 use crate::format::{Compression, Entry, Trailer, MAGIC, TAG_END};
 
@@ -28,7 +30,7 @@ pub struct Writer {
     last_node_pos: Option<u64>,
     last_node_size: Option<u32>,
     blocks: Vec<Block>,
-    // bloom: BloomFilter,
+    bloom: BloomFilter,
     compress: Compression,
     value_count: usize,
     tombstone_count: usize,
@@ -44,7 +46,12 @@ impl std::fmt::Debug for Writer {
 }
 
 impl Writer {
-    pub fn new(name: impl AsRef<Path>) -> Result<Self> {
+    pub fn with_expected_num_items(
+        name: impl AsRef<Path>,
+        expected_num_items: usize,
+    ) -> Result<Self> {
+        let bloom = BloomFilter::with_false_pos(0.01).expected_items(expected_num_items);
+
         let mut index_file = OpenOptions::new()
             .append(true)
             .create_new(true)
@@ -57,6 +64,7 @@ impl Writer {
             last_node_pos: None,
             last_node_size: None,
             blocks: Default::default(),
+            bloom,
             compress: Compression::None,
             value_count: 0,
             tombstone_count: 0,
@@ -68,6 +76,9 @@ impl Writer {
     }
 
     pub fn add(&mut self, entry: Entry) -> Result<()> {
+        if !entry.is_pos_len() {
+            self.bloom.insert(entry.key());
+        }
         self.append_to_block(0, entry)?;
         Ok(())
     }
@@ -90,7 +101,7 @@ impl Writer {
                 FIRST_BLOCK_POS
             }
         };
-        let trailer = Trailer::new(vec![], root_pos)?;
+        let trailer = Trailer::with_bloom_filter(self.bloom, root_pos);
         self.index_file.write_all(&trailer.encode())?;
         self.index_file.sync_data()?;
         Ok(())
@@ -186,6 +197,12 @@ pub mod tests {
     use super::*;
     use crate::format::Tree;
     use tempfile::tempdir;
+
+    impl Writer {
+        pub fn new(name: impl AsRef<Path>) -> Result<Self> {
+            Self::with_expected_num_items(name, 1024)
+        }
+    }
 
     // Roundtrip - write some values to a file and read the file back
     #[test]
@@ -336,19 +353,29 @@ pub mod tests {
         let writer = Writer::new(&data).unwrap();
         writer.close().unwrap();
         let contents = std::fs::read(&data).unwrap();
+        let bloom = BloomFilter::with_false_pos(0.01).expected_items(1024);
+        let bloom_len = bloom.as_slice().len() * 8;
         // magic - 4
         // blocklen - 4
         // level - 2
         // pad - 4
+        // bloom - X
         // bloom_len - 4
         // root_pos - 8
-        assert_eq!(contents.len(), 26);
+        assert_eq!(contents.len(), 26 + bloom_len);
         assert_eq!(&contents[0..4], "HAN3".as_bytes()); // magic
         assert_eq!(&contents[4..8], &[0, 0, 0, 0]); // blocklen = 0
         assert_eq!(&contents[8..10], &[0, 0]); // level = 0
         assert_eq!(&contents[10..14], &[0, 0, 0, 0]); // pad
-        assert_eq!(&contents[14..18], &[0, 0, 0, 0]); // bloom_len
-        assert_eq!(&contents[18..26], &[0, 0, 0, 0, 0, 0, 0, 4]); // root_pos
+                                                      // skip bloom filter
+        assert_eq!(
+            &contents[14 + bloom_len..18 + bloom_len],
+            (bloom_len as u32).to_be_bytes()
+        ); // bloom_len
+        assert_eq!(
+            &contents[18 + bloom_len..26 + bloom_len],
+            &[0, 0, 0, 0, 0, 0, 0, 4]
+        ); // root_pos
 
         let _tree = Tree::from_file(&data).unwrap();
         // TODO: Fix Block::from_start to accept empty blocks

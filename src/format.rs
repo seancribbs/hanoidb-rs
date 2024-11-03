@@ -1,4 +1,5 @@
 use crate::error::*;
+use fastbloom::BloomFilter;
 use std::fs::File;
 use std::io::{ErrorKind, Read, Seek, SeekFrom};
 use std::path::Path;
@@ -16,7 +17,7 @@ pub const MAGIC: &str = "HAN3";
 
 pub struct Tree {
     file: File,
-    len: u64,
+    trailer: Trailer,
 }
 
 impl Tree {
@@ -26,7 +27,8 @@ impl Tree {
         let mut magic: Vec<u8> = vec![0; 4];
         file.read_exact(&mut magic)?;
         if magic == MAGIC.as_bytes() {
-            Ok(Self { file, len })
+            let trailer = Self::read_trailer(&file, len)?;
+            Ok(Self { file, trailer })
         } else {
             Err(Error::InvalidTreeFormat(magic))
         }
@@ -34,14 +36,12 @@ impl Tree {
 
     pub fn try_clone(&self) -> Result<Self> {
         let file = self.file.try_clone()?;
-        let len = file.metadata()?.len();
-        Ok(Self { file, len })
+        let trailer = self.trailer.clone();
+        Ok(Self { file, trailer })
     }
 
     pub fn root_block(&self) -> Result<Block<'_>> {
-        let trailer = self.trailer()?;
-        let start = trailer.root_pos;
-        Block::from_start(&self.file, start)
+        Block::from_start(&self.file, self.trailer.root_pos)
     }
 
     pub fn block_from_poslen_entry(&self, entry: &Entry) -> Result<Block<'_>> {
@@ -54,8 +54,7 @@ impl Tree {
         Block::from_start_length(&self.file, *blockpos, *blocklen)
     }
 
-    pub fn trailer(&self) -> Result<Trailer> {
-        let mut file = &self.file;
+    fn read_trailer(mut file: &File, len: u64) -> Result<Trailer> {
         file.seek(SeekFrom::End(-12))?; // bloom_len: 4, root_pos: 8
         let mut buffer = vec![0; 12];
         file.read_exact(&mut buffer)?;
@@ -70,16 +69,12 @@ impl Tree {
         }
         let mut bloom = vec![0; bloom_len as usize];
         file.read_exact(&mut bloom)?;
-        if root_pos >= self.len {
+        if root_pos >= len {
             return Err(Error::CorruptedFile(
                 "root block position outside bounds of file",
             ));
         }
-        Ok(Trailer {
-            bloom,
-            bloom_len,
-            root_pos,
-        })
+        Trailer::new(bloom, root_pos)
     }
 
     #[allow(dead_code)]
@@ -206,34 +201,73 @@ impl<'a> Iterator for TreeEntryIterator<'a> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Trailer {
-    bloom: Vec<u8>,
-    bloom_len: u32,
+    bloom: BloomFilter,
     root_pos: u64,
 }
 
 impl Trailer {
-    pub fn new(bloom: Vec<u8>, root_pos: u64) -> Result<Self> {
-        let bloom_len: u32 = bloom
-            .len()
-            .try_into()
-            .map_err(|_| Error::BloomFilterTooLarge)?;
-        Ok(Self {
-            bloom,
-            bloom_len,
-            root_pos,
-        })
+    pub fn with_bloom_filter(bloom: BloomFilter, root_pos: u64) -> Self {
+        Self { bloom, root_pos }
+    }
+
+    pub fn new(raw_bloom: Vec<u8>, root_pos: u64) -> Result<Self> {
+        // Bloom filter is too big for our file format
+        if raw_bloom.len() > u32::MAX as usize {
+            return Err(Error::BloomFilterTooLarge);
+        }
+
+        // The file is empty, so the bloom filter was written as 0-length
+        if raw_bloom.is_empty() {
+            return Ok(Self {
+                bloom: BloomFilter::with_false_pos(0.01).expected_items(1024),
+                root_pos,
+            });
+        }
+
+        // Bloom filter should be composed of u64's
+        if raw_bloom.len() % 8 != 0 {
+            return Err(Error::BloomFilterIncorrectSize);
+        }
+
+        // Collect the contents as a Vec<u64>
+        let bit_vec = raw_bloom
+            .chunks_exact(8)
+            .map(|bytes| Ok(u64::from_be_bytes(bytes.try_into()?)))
+            .collect::<Result<Vec<u64>>>()?;
+
+        let expected_num_items = items_count_estimate(raw_bloom.len() * 8, 0.01);
+
+        let bloom = BloomFilter::from_vec(bit_vec).expected_items(expected_num_items);
+
+        Ok(Self::with_bloom_filter(bloom, root_pos))
     }
 
     pub fn encode(&self) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(self.bloom.len() + 12);
+        let raw_bloom: Vec<u8> = self
+            .bloom
+            .as_slice()
+            .iter()
+            .flat_map(|n| n.to_be_bytes())
+            .collect();
+
+        let mut buffer = Vec::with_capacity(raw_bloom.len() + 12);
         buffer.extend([0, 0, 0, 0]);
-        buffer.extend(&self.bloom);
-        buffer.extend(self.bloom_len.to_be_bytes());
+        buffer.extend(&raw_bloom);
+        buffer.extend((raw_bloom.len() as u32).to_be_bytes());
         buffer.extend(self.root_pos.to_be_bytes());
         buffer
     }
+}
+
+use std::f64::consts::LN_2;
+
+// Reverse engineers the expected number of items from the size of the bitvector
+// See fastbloom's "optimal_size" function for reference
+fn items_count_estimate(size: usize, fp_p: f64) -> usize {
+    let log2_2 = LN_2 * LN_2;
+    (size as f64 * (-8.0 * log2_2) / fp_p.ln() / 8.0).ceil() as usize
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

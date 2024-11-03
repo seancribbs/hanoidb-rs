@@ -23,7 +23,7 @@ impl Merger {
         let a = a_tree.entries_owned()?.peekable();
         let b = b_tree.entries_owned()?.peekable();
         let xfile = path.as_ref().to_path_buf().join(format!("X-{level}.data"));
-        let x = Writer::new(&xfile)?;
+        let x = Writer::with_expected_num_items(&xfile, 1 << (level + 1))?;
         Ok(Self { a, b, x })
     }
 

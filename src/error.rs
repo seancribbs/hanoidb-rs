@@ -35,6 +35,9 @@ pub enum Error {
 
     #[error("bloom filter too large")]
     BloomFilterTooLarge,
+
+    #[error("bloom filter is not multiple of 8 bytes")]
+    BloomFilterIncorrectSize,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

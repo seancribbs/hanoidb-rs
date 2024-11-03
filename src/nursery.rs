@@ -88,7 +88,7 @@ impl Nursery {
         let min_level_size = 1 << self.min_level;
         if self.data.len() >= min_level_size {
             let filename = self.directory.join("nursery.data");
-            let mut writer = Writer::new(&filename)?;
+            let mut writer = Writer::with_expected_num_items(&filename, min_level_size)?;
             let data = std::mem::take(&mut self.data);
             for (key, value) in data.into_iter() {
                 let entry = match value {
@@ -160,7 +160,7 @@ impl Nursery {
         let command = if !data.is_empty() {
             let mut data_file = log_file.as_ref().to_path_buf();
             data_file.set_file_name("nursery.data");
-            let mut writer = Writer::new(&data_file)?;
+            let mut writer = Writer::with_expected_num_items(&data_file, 1 << target_level)?;
             for (_, entry) in data.into_iter() {
                 writer.add(entry)?;
             }
