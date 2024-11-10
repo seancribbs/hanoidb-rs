@@ -375,6 +375,5 @@ pub mod tests {
         let raw_bloom = &contents[contents.len() - 12 - bloom_len as usize..contents.len() - 12];
         let _: BloomFilter = postcard::from_bytes(raw_bloom).unwrap();
         let _tree = Tree::from_file(&data).unwrap();
-        // TODO: Fix Block::from_start to accept empty blocks
     }
 }

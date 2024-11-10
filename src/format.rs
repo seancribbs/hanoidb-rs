@@ -287,6 +287,17 @@ impl<'a> Block<'a> {
         let blocklen = u32::from_be_bytes(header[0..4].try_into()?);
         let level = u16::from_be_bytes(header[4..6].try_into()?);
         let compression: Compression = header[6].try_into()?;
+
+        if blocklen == 0 {
+            return Ok(Self {
+                start,
+                blocklen,
+                level,
+                compression,
+                file,
+            });
+        }
+
         if header[7] == TAG_END {
             Ok(Self {
                 start,
@@ -580,5 +591,24 @@ impl<'a> Iterator for EntryIterator<'a> {
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::writer::Writer;
+
+    use tempfile::tempdir;
+
+    #[test]
+    fn block_from_start_accepts_empty_blocks() {
+        let dir = tempdir().unwrap();
+        let data = dir.as_ref().join("test.data");
+        let writer = Writer::new(&data).unwrap();
+        writer.close().unwrap();
+        let tree = Tree::from_file(&data).unwrap();
+        let root_block = tree.root_block().unwrap();
+        assert_eq!(root_block.entries().count(), 0)
     }
 }
