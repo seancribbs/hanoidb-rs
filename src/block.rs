@@ -11,7 +11,6 @@ pub struct Block<'a> {
     pub blocklen: u32,
     pub level: u16,
     #[allow(dead_code)]
-    // TODO: Implement compression on reads and writes
     pub compression: Compression,
     file: &'a File,
 }

@@ -1,2 +1,4 @@
 - [ ] Recover files left in the merged-but-not-promoted state
 - [ ] Recover files in the incomplete non-promotion state (B and C? and M but not A)
+- [ ] DB::handle_commands: Should we handle additional commands immediately in a recursive fashion?
+- [ ] Review incremental merge accounting logic to see if the counted and propagated steps make sense

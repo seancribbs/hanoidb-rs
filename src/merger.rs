@@ -129,7 +129,7 @@ mod tests {
             panic!("merge did not complete");
         };
         assert_eq!(count, 2);
-        assert_eq!(steps, 3); // TODO: does this value make sense?
+        assert_eq!(steps, 3);
         assert!(std::fs::exists(dir.as_ref().join("X-10.data")).unwrap());
     }
 

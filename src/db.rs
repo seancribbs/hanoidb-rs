@@ -89,8 +89,6 @@ impl HanoiDB {
     fn handle_commands(&mut self, commands: Vec<Command>) -> Result<()> {
         let mut commands = VecDeque::from(commands);
         while let Some(command) = commands.pop_front() {
-            // TODO: Should we handle additional commands immediately in a
-            // recursive fashion?
             let extra_commands = self.handle_command(command)?;
             commands.extend(extra_commands);
         }

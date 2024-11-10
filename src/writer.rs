@@ -129,7 +129,6 @@ impl Writer {
         block.size = new_size;
         block.members.push(entry);
 
-        // TODO: Update bloom filter
         self.tombstone_count += tombstone_count;
         self.value_count += value_count;
 
@@ -175,22 +174,35 @@ impl Writer {
     }
 
     fn get_block_at_level(&mut self, level: u16) -> &mut Block {
+        // GOAL: Get a Block struct that is at the given level so
+        // that we can add an Entry to it.
         if self.blocks.is_empty() {
+            // If there are no pending blocks in the writer, we add a new one at the
+            // requested level.
             self.blocks.push(Block {
                 level,
                 ..Default::default()
             });
         } else {
-            // TODO: Can we make this clearer?
+            // If there are pending blocks, we check that the level of the last one
+            // is the same as the level that we are requesting. Because of the order
+            // of inserts, either the block at the end of the list of pending blocks
+            // is the same level, or it is at a greater level than the requested one.
+            // This means that we need to add blocks of decreasing levels until we reach
+            // the requested level.
+            //
+            // WONT PANIC: We already know there is at least one block in the pending list.
             let mut last_level = self.blocks.last().unwrap().level;
             while last_level > level {
                 self.blocks.push(Block {
                     level: last_level - 1,
                     ..Default::default()
                 });
+                // WONT PANIC: We just inserted a new block into the pending list.
                 last_level = self.blocks.last().unwrap().level;
             }
         }
+        // WONT PANIC: We either found a block of the level given, or we inserted it.
         self.blocks.last_mut().unwrap()
     }
 }
