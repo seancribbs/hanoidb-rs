@@ -228,48 +228,21 @@ impl Trailer {
             });
         }
 
-        // Bloom filter should be composed of u64's
-        if raw_bloom.len() % 8 != 0 {
-            return Err(Error::BloomFilterIncorrectSize);
-        }
-
-        // Collect the contents as a Vec<u64>
-        let bit_vec = raw_bloom
-            .chunks_exact(8)
-            .map(|bytes| Ok(u64::from_be_bytes(bytes.try_into()?)))
-            .collect::<Result<Vec<u64>>>()?;
-
-        let expected_num_items = items_count_estimate(raw_bloom.len() * 8, 0.01);
-
-        let bloom = BloomFilter::from_vec(bit_vec).expected_items(expected_num_items);
+        let bloom: BloomFilter = postcard::from_bytes(&raw_bloom)?;
 
         Ok(Self::with_bloom_filter(bloom, root_pos))
     }
 
-    pub fn encode(&self) -> Vec<u8> {
-        let raw_bloom: Vec<u8> = self
-            .bloom
-            .as_slice()
-            .iter()
-            .flat_map(|n| n.to_be_bytes())
-            .collect();
+    pub fn encode(&self) -> Result<Vec<u8>> {
+        let raw_bloom: Vec<u8> = postcard::to_stdvec(&self.bloom)?;
 
         let mut buffer = Vec::with_capacity(raw_bloom.len() + 12);
         buffer.extend([0, 0, 0, 0]);
         buffer.extend(&raw_bloom);
         buffer.extend((raw_bloom.len() as u32).to_be_bytes());
         buffer.extend(self.root_pos.to_be_bytes());
-        buffer
+        Ok(buffer)
     }
-}
-
-use std::f64::consts::LN_2;
-
-// Reverse engineers the expected number of items from the size of the bitvector
-// See fastbloom's "optimal_size" function for reference
-fn items_count_estimate(size: usize, fp_p: f64) -> usize {
-    let log2_2 = LN_2 * LN_2;
-    (size as f64 * (-8.0 * log2_2) / fp_p.ln() / 8.0).ceil() as usize
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

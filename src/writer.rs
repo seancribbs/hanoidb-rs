@@ -102,7 +102,7 @@ impl Writer {
             }
         };
         let trailer = Trailer::with_bloom_filter(self.bloom, root_pos);
-        self.index_file.write_all(&trailer.encode())?;
+        self.index_file.write_all(&trailer.encode()?)?;
         self.index_file.sync_data()?;
         Ok(())
     }
@@ -353,8 +353,6 @@ pub mod tests {
         let writer = Writer::new(&data).unwrap();
         writer.close().unwrap();
         let contents = std::fs::read(&data).unwrap();
-        let bloom = BloomFilter::with_false_pos(0.01).expected_items(1024);
-        let bloom_len = bloom.as_slice().len() * 8;
         // magic - 4
         // blocklen - 4
         // level - 2
@@ -362,21 +360,20 @@ pub mod tests {
         // bloom - X
         // bloom_len - 4
         // root_pos - 8
-        assert_eq!(contents.len(), 26 + bloom_len);
+        assert!(contents.len() > 26);
         assert_eq!(&contents[0..4], "HAN3".as_bytes()); // magic
         assert_eq!(&contents[4..8], &[0, 0, 0, 0]); // blocklen = 0
         assert_eq!(&contents[8..10], &[0, 0]); // level = 0
         assert_eq!(&contents[10..14], &[0, 0, 0, 0]); // pad
                                                       // skip bloom filter
-        assert_eq!(
-            &contents[14 + bloom_len..18 + bloom_len],
-            (bloom_len as u32).to_be_bytes()
-        ); // bloom_len
-        assert_eq!(
-            &contents[18 + bloom_len..26 + bloom_len],
-            &[0, 0, 0, 0, 0, 0, 0, 4]
-        ); // root_pos
-
+        assert_eq!(&contents[contents.len() - 8..], &[0, 0, 0, 0, 0, 0, 0, 4]); // root_pos
+        let bloom_len = u32::from_be_bytes(
+            contents[contents.len() - 12..contents.len() - 8]
+                .try_into()
+                .unwrap(),
+        );
+        let raw_bloom = &contents[contents.len() - 12 - bloom_len as usize..contents.len() - 12];
+        let _: BloomFilter = postcard::from_bytes(raw_bloom).unwrap();
         let _tree = Tree::from_file(&data).unwrap();
         // TODO: Fix Block::from_start to accept empty blocks
     }
