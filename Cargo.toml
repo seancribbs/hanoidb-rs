@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 crc32fast = "1.4.2"
-derive_more = { version = "1.0.0", features = ["is_variant"] }
 fastbloom = { git = "https://github.com/tomtomwombat/fastbloom.git", features = [
     "serde",
 ], rev = "150433b" }

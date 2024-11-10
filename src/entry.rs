@@ -4,7 +4,7 @@ use crate::{TAG_DELETED, TAG_DELETED2, TAG_END, TAG_KV_DATA, TAG_KV_DATA2, TAG_P
 use std::fs::File;
 use std::io::{ErrorKind, Read};
 
-#[derive(Debug, Clone, derive_more::IsVariant, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum Entry {
     KeyVal {
@@ -24,6 +24,31 @@ pub enum Entry {
 }
 
 impl Entry {
+    ///Returns `true` if this value is of type `
+    ///KeyVal
+    ///`. Returns `false` otherwise
+    #[inline]
+    #[must_use]
+    pub const fn is_key_val(&self) -> bool {
+        matches!(self, Entry::KeyVal { .. })
+    }
+    ///Returns `true` if this value is of type `
+    ///Deleted
+    ///`. Returns `false` otherwise
+    #[inline]
+    #[must_use]
+    pub const fn is_deleted(&self) -> bool {
+        matches!(self, Entry::Deleted { .. })
+    }
+    ///Returns `true` if this value is of type `
+    ///PosLen
+    ///`. Returns `false` otherwise
+    #[inline]
+    #[must_use]
+    pub const fn is_pos_len(&self) -> bool {
+        matches!(self, Entry::PosLen { .. })
+    }
+
     pub fn key(&self) -> &[u8] {
         match self {
             Entry::KeyVal { key, .. } | Entry::Deleted { key, .. } | Entry::PosLen { key, .. } => {
