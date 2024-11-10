@@ -1,9 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use crate::db::Command;
+use crate::entry::Entry;
 use crate::error::*;
-use crate::format::*;
 use crate::merger::*;
+use crate::tree::Tree;
 
 pub struct Level {
     level: u32,

@@ -4,8 +4,11 @@ use std::path::{Path, PathBuf};
 
 use fastbloom::BloomFilter;
 
+use crate::compression::Compression;
+use crate::entry::Entry;
 use crate::error::*;
-use crate::format::{Compression, Entry, Trailer, MAGIC, TAG_END};
+use crate::trailer::Trailer;
+use crate::{MAGIC, TAG_END};
 
 const BLOCK_SIZE: usize = 8 * 1024;
 const FIRST_BLOCK_POS: u64 = 4;
@@ -195,7 +198,7 @@ impl Writer {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::format::Tree;
+    use crate::tree::Tree;
     use tempfile::tempdir;
 
     impl Writer {

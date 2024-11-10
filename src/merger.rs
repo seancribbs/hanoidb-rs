@@ -3,7 +3,7 @@ use std::iter::Peekable;
 use std::path::Path;
 
 use crate::error::*;
-use crate::format::{OwnedTreeEntryIterator, Tree};
+use crate::tree::{OwnedTreeEntryIterator, Tree};
 use crate::writer::Writer;
 
 pub struct Merger {
@@ -85,7 +85,8 @@ pub enum MergeOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::format::{Entry, Tree};
+    use crate::entry::Entry;
+    use crate::tree::Tree;
     use crate::writer::tests::write_8kb;
     use tempfile::tempdir;
 

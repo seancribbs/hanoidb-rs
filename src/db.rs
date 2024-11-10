@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
+use crate::entry::Entry;
 use crate::error::*;
-use crate::format::Entry;
 use crate::level::{level_size, Level};
 use crate::nursery::{Nursery, Value};
 

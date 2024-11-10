@@ -4,8 +4,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::db::Command;
+use crate::entry::Entry;
 use crate::error::*;
-use crate::format::Entry;
 use crate::writer::Writer;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
