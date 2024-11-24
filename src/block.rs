@@ -24,29 +24,13 @@ impl<'a> Block<'a> {
         let level = u16::from_be_bytes(header[4..6].try_into()?);
         let compression: Compression = header[6].try_into()?;
 
-        if blocklen == 0 {
-            return Ok(Self {
-                start,
-                blocklen,
-                level,
-                compression,
-                file,
-            });
-        }
-
-        if header[7] == TAG_END {
-            Ok(Self {
-                start,
-                blocklen,
-                level,
-                compression,
-                file,
-            })
-        } else {
-            Err(Error::CorruptedFile(
-                "block entries did not start with TAG_END",
-            ))
-        }
+        Ok(Self {
+            start,
+            blocklen,
+            level,
+            compression,
+            file,
+        })
     }
 
     pub fn from_start_length(file: &'a File, start: u64, length: u32) -> Result<Self> {
@@ -59,91 +43,66 @@ impl<'a> Block<'a> {
         }
     }
 
-    pub fn entries(&self) -> EntryIterator<'a> {
-        EntryIterator {
-            file: self.file,
-            start: self.start + 8, // Skip the header part of the block (8 bytes)
-            end: self.start + (self.blocklen as u64),
-        }
-    }
-
-    pub fn entries_owned(&self) -> Result<OwnedEntryIterator> {
+    pub fn entries(&self) -> Result<EntryIterator> {
         let file = self.file.try_clone()?;
-        Ok(OwnedEntryIterator {
+        let mut decompressor = self.compression.reader(BlockContentsReader {
             file,
-            start: self.start + 8,
+            start: self.start + 7, // Skip the header part of the block (7 bytes)
             end: self.start + (self.blocklen as u64),
-        })
+        });
+
+        // SAFETY: If the blocklen is 0, then reading from the block will never fill
+        // a buffer because start > end. Therefore we don't need to check for the tag
+        // byte or advance the reader at all.
+        if self.blocklen == 0 {
+            return Ok(EntryIterator(decompressor));
+        }
+
+        // Each block that has entries contains a TAG_END byte at the beginning.
+        // If that is missing, then we can't read entries. If it is present, we
+        // need to skip it.
+        let mut tag = vec![0u8; 1];
+        decompressor.read_exact(&mut tag)?;
+
+        if tag[0] == TAG_END {
+            Ok(EntryIterator(decompressor))
+        } else {
+            Err(Error::CorruptedFile(
+                "block entries did not start with TAG_END",
+            ))
+        }
     }
 }
 
-pub struct OwnedEntryIterator {
+struct BlockContentsReader {
     file: File,
     start: u64,
     end: u64,
 }
 
-impl Iterator for OwnedEntryIterator {
-    type Item = Entry;
-
-    fn next(&mut self) -> Option<Self::Item> {
+impl Read for BlockContentsReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         if self.start >= self.end {
-            return None;
+            return Ok(0);
         }
 
-        if self.file.seek(SeekFrom::Start(self.start)).is_err() {
-            // TODO: Don't swallow the result of the above call
-            // Ensure iterator terminates when there's an IO problem
-            self.start = self.end;
-            return None;
-        }
+        self.file.seek(SeekFrom::Start(self.start))?;
 
-        match Entry::read(&self.file) {
-            Ok((entry, read_amount)) => {
-                self.start += read_amount;
-                Some(entry)
-            }
-            Err(_) => {
-                // Ensure iterator terminates when there's a problem reading an Entry
-                self.start = self.end;
-                None
-            }
+        let result = self.file.read(buf);
+        if let Ok(len) = result {
+            self.start += len as u64;
         }
+        result
     }
 }
 
-pub struct EntryIterator<'a> {
-    file: &'a File,
-    start: u64,
-    end: u64,
-}
+pub struct EntryIterator(Box<dyn Read>);
 
-impl<'a> Iterator for EntryIterator<'a> {
+impl Iterator for EntryIterator {
     type Item = Entry;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.start >= self.end {
-            return None;
-        }
-
-        if self.file.seek(SeekFrom::Start(self.start)).is_err() {
-            // TODO: Don't swallow the result of the above call
-            // Ensure iterator terminates when there's an IO problem
-            self.start = self.end;
-            return None;
-        }
-
-        match Entry::read(self.file) {
-            Ok((entry, read_amount)) => {
-                self.start += read_amount;
-                Some(entry)
-            }
-            Err(_) => {
-                // Ensure iterator terminates when there's a problem reading an Entry
-                self.start = self.end;
-                None
-            }
-        }
+        Entry::read(&mut self.0).ok()
     }
 }
 
@@ -162,6 +121,6 @@ mod tests {
         writer.close().unwrap();
         let tree = Tree::from_file(&data).unwrap();
         let root_block = tree.root_block().unwrap();
-        assert_eq!(root_block.entries().count(), 0)
+        assert_eq!(root_block.entries().unwrap().count(), 0)
     }
 }

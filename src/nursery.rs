@@ -136,11 +136,11 @@ impl Nursery {
             return Ok(None);
         }
 
-        let file = OpenOptions::new().read(true).open(&log_file)?;
+        let mut file = OpenOptions::new().read(true).open(&log_file)?;
         let mut data: BTreeMap<Vec<u8>, Entry> = Default::default();
         loop {
-            let entry = match Entry::read(&file) {
-                Ok((entry, _)) => entry,
+            let entry = match Entry::read(&mut file) {
+                Ok(entry) => entry,
                 Err(err) => {
                     if !matches!(err, Error::EndOfFile) {
                         eprintln!("Error reading {}, {err}", log_file.as_ref().display());

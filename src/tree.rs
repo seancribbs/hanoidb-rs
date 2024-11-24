@@ -1,4 +1,4 @@
-use crate::block::{Block, EntryIterator, OwnedEntryIterator};
+use crate::block::{Block, EntryIterator};
 use crate::entry::Entry;
 use crate::error::*;
 use crate::trailer::Trailer;
@@ -69,14 +69,8 @@ impl Tree {
         Trailer::new(bloom, root_pos)
     }
 
-    #[allow(dead_code)]
-    // TODO: Use this for full-database folds/scans
-    pub fn entries(&self) -> Result<TreeEntryIterator<'_>> {
-        TreeEntryIterator::new(self)
-    }
-
-    pub fn entries_owned(&self) -> Result<OwnedTreeEntryIterator> {
-        OwnedTreeEntryIterator::new(self.try_clone()?)
+    pub fn entries(&self) -> Result<TreeEntryIterator> {
+        TreeEntryIterator::new(self.try_clone()?)
     }
 
     pub fn get_entry(&self, key: &[u8]) -> Result<Option<Entry>> {
@@ -90,7 +84,7 @@ impl Tree {
             // level == 0 -> leaf block
             if block.level > 0 {
                 let entry = block
-                    .entries()
+                    .entries()?
                     .take_while(|e| {
                         !matches!(e, Entry::PosLen {
                             key: first_key,
@@ -105,20 +99,20 @@ impl Tree {
                     return Ok(None);
                 }
             } else {
-                return Ok(block.entries().find(|entry| entry.key() == key));
+                return Ok(block.entries()?.find(|entry| entry.key() == key));
             }
         }
     }
 }
 
-pub struct OwnedTreeEntryIterator {
+pub struct TreeEntryIterator {
     tree: Tree,
-    levels: Vec<OwnedEntryIterator>,
+    levels: Vec<EntryIterator>,
 }
 
-impl OwnedTreeEntryIterator {
+impl TreeEntryIterator {
     fn new(tree: Tree) -> Result<Self> {
-        let root_iter = tree.root_block()?.entries_owned()?;
+        let root_iter = tree.root_block()?.entries()?;
         Ok(Self {
             tree,
             levels: vec![root_iter],
@@ -126,7 +120,7 @@ impl OwnedTreeEntryIterator {
     }
 }
 
-impl Iterator for OwnedTreeEntryIterator {
+impl Iterator for TreeEntryIterator {
     type Item = Entry;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -138,47 +132,8 @@ impl Iterator for OwnedTreeEntryIterator {
                         .tree
                         .block_from_poslen_entry(&entry)
                         .ok()?
-                        .entries_owned()
+                        .entries()
                         .ok()?;
-                    self.levels.push(block_iterator);
-                    continue;
-                }
-                entry @ Some(_) => {
-                    return entry;
-                }
-                None => {
-                    // pop this iterator off
-                    let _ = self.levels.pop();
-                    continue;
-                }
-            }
-        }
-    }
-}
-
-pub struct TreeEntryIterator<'a> {
-    tree: &'a Tree,
-    levels: Vec<EntryIterator<'a>>,
-}
-
-impl<'a> TreeEntryIterator<'a> {
-    fn new(tree: &'a Tree) -> Result<Self> {
-        Ok(Self {
-            tree,
-            levels: vec![tree.root_block()?.entries()],
-        })
-    }
-}
-
-impl<'a> Iterator for TreeEntryIterator<'a> {
-    type Item = Entry;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let level = self.levels.last_mut()?;
-            match level.next() {
-                Some(entry @ Entry::PosLen { .. }) => {
-                    let block_iterator = self.tree.block_from_poslen_entry(&entry).ok()?.entries();
                     self.levels.push(block_iterator);
                     continue;
                 }

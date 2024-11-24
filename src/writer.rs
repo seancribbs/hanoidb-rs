@@ -144,21 +144,24 @@ impl Writer {
             .pop()
             .expect("cannot flush block that doesn't exist");
         let first_key = block.members.first().unwrap().key().to_owned();
-        // block size + level + compression + TAG_END
-        let mut buffer = Vec::with_capacity(block.size + 8);
-        // TODO: We don't actually know until we've compressed the entries what the
-        // total size is going to be.
-        buffer.extend(((block.size + 2) as u32).to_be_bytes());
-        buffer.extend(block.level.to_be_bytes());
-        buffer.push(self.compress as u8);
-        buffer.push(TAG_END);
+        // block size + level + compression
+        let mut header = Vec::with_capacity(7);
+        let mut contents = Vec::with_capacity(block.size);
+        contents.push(TAG_END);
         for entry in block.members {
-            buffer.extend(entry.encode());
+            contents.extend(entry.encode());
         }
-        self.index_file.write_all(&buffer)?;
+        let compressed = self.compress.compress(contents)?;
+
+        header.extend(((compressed.len() + 2) as u32).to_be_bytes());
+        header.extend(block.level.to_be_bytes());
+        header.push(self.compress as u8);
+
+        self.index_file.write_all(&header)?;
+        self.index_file.write_all(&compressed)?;
 
         let blockpos = self.index_file_pos;
-        let blocklen: u32 = buffer.len().try_into().unwrap();
+        let blocklen: u32 = (compressed.len() + 3).try_into().unwrap();
         self.last_node_pos = Some(blockpos);
         self.last_node_size = Some(blocklen);
         self.index_file_pos += blocklen as u64;

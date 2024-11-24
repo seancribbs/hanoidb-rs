@@ -1,7 +1,7 @@
 use crate::error::*;
 
 use crate::{TAG_DELETED, TAG_DELETED2, TAG_END, TAG_KV_DATA, TAG_KV_DATA2, TAG_POSLEN32};
-use std::fs::File;
+
 use std::io::{ErrorKind, Read};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,7 +57,7 @@ impl Entry {
         }
     }
 
-    pub fn read(mut file: &File) -> Result<(Self, u64)> {
+    pub fn read(file: &mut impl Read) -> Result<Self> {
         let mut header = vec![0; 8];
         file.read_exact(&mut header).map_err(|err| {
             if err.kind() == ErrorKind::UnexpectedEof {
@@ -137,7 +137,7 @@ impl Entry {
         if tag[0] != TAG_END {
             return Err(Error::CorruptedFile("Last byte of entry wasn't TAG_END"));
         }
-        Ok((entry, 9 + length as u64))
+        Ok(entry)
     }
 
     pub fn encode(&self) -> Vec<u8> {

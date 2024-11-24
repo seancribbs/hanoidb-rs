@@ -3,12 +3,12 @@ use std::iter::Peekable;
 use std::path::Path;
 
 use crate::error::*;
-use crate::tree::{OwnedTreeEntryIterator, Tree};
+use crate::tree::{Tree, TreeEntryIterator};
 use crate::writer::Writer;
 
 pub struct Merger {
-    a: Peekable<OwnedTreeEntryIterator>,
-    b: Peekable<OwnedTreeEntryIterator>,
+    a: Peekable<TreeEntryIterator>,
+    b: Peekable<TreeEntryIterator>,
     x: Writer,
 }
 
@@ -20,8 +20,8 @@ impl std::fmt::Debug for Merger {
 
 impl Merger {
     pub fn new(path: impl AsRef<Path>, level: u32, a_tree: &Tree, b_tree: &Tree) -> Result<Self> {
-        let a = a_tree.entries_owned()?.peekable();
-        let b = b_tree.entries_owned()?.peekable();
+        let a = a_tree.entries()?.peekable();
+        let b = b_tree.entries()?.peekable();
         let xfile = path.as_ref().to_path_buf().join(format!("X-{level}.data"));
         let x = Writer::with_expected_num_items(&xfile, 1 << (level + 1))?;
         Ok(Self { a, b, x })
