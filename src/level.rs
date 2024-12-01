@@ -5,6 +5,7 @@ use crate::entry::Entry;
 use crate::error::*;
 use crate::merger::*;
 use crate::tree::Tree;
+use crate::Compression;
 
 pub struct Level {
     level: u32,
@@ -13,10 +14,11 @@ pub struct Level {
     b: Option<Tree>,
     c: Option<Tree>,
     merger: Option<Merger>,
+    compression: Compression,
 }
 
 impl Level {
-    pub fn new(path: impl AsRef<Path>, level: u32) -> Result<Self> {
+    pub fn new(path: impl AsRef<Path>, level: u32, compression: Compression) -> Result<Self> {
         let path: PathBuf = path.as_ref().to_path_buf();
         let a_file = data_file_name(&path, level, "A");
         let a = a_file
@@ -40,6 +42,7 @@ impl Level {
             b,
             c,
             merger: None,
+            compression,
         };
         level.maybe_create_merger()?;
         Ok(level)
@@ -179,7 +182,13 @@ impl Level {
 
     fn maybe_create_merger(&mut self) -> Result<()> {
         if let (Some(a_tree), Some(b_tree), None) = (&self.a, &self.b, &self.merger) {
-            self.merger = Some(Merger::new(&self.path, self.level, a_tree, b_tree)?);
+            self.merger = Some(Merger::new(
+                &self.path,
+                self.level,
+                a_tree,
+                b_tree,
+                self.compression,
+            )?);
         }
         Ok(())
     }

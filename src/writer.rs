@@ -34,7 +34,7 @@ pub struct Writer {
     last_node_size: Option<u32>,
     blocks: Vec<Block>,
     bloom: BloomFilter,
-    compress: Compression,
+    compression: Compression,
     value_count: usize,
     tombstone_count: usize,
 }
@@ -52,6 +52,7 @@ impl Writer {
     pub fn with_expected_num_items(
         name: impl AsRef<Path>,
         expected_num_items: usize,
+        compression: Compression,
     ) -> Result<Self> {
         let bloom = BloomFilter::with_false_pos(0.01).expected_items(expected_num_items);
 
@@ -68,7 +69,7 @@ impl Writer {
             last_node_size: None,
             blocks: Default::default(),
             bloom,
-            compress: Compression::None,
+            compression,
             value_count: 0,
             tombstone_count: 0,
         })
@@ -151,14 +152,14 @@ impl Writer {
         for entry in block.members {
             contents.extend(entry.encode());
         }
-        let compressed = self.compress.compress(contents)?;
+        let compressed = self.compression.compress(contents)?;
 
         // blocklen = 2 bytes level + 1 byte compression + length of compressed contents
         let blocklen: u32 = (2 + 1 + compressed.len()).try_into().unwrap();
 
         header.extend(blocklen.to_be_bytes());
         header.extend(block.level.to_be_bytes());
-        header.push(self.compress as u8);
+        header.push(self.compression as u8);
 
         self.index_file.write_all(&header)?;
         self.index_file.write_all(&compressed)?;
@@ -220,7 +221,11 @@ pub mod tests {
 
     impl Writer {
         pub fn new(name: impl AsRef<Path>) -> Result<Self> {
-            Self::with_expected_num_items(name, 1024)
+            Self::with_compression(name, Compression::None)
+        }
+
+        pub fn with_compression(name: impl AsRef<Path>, compression: Compression) -> Result<Self> {
+            Self::with_expected_num_items(name, 1024, compression)
         }
     }
 
@@ -243,6 +248,90 @@ pub mod tests {
             timestamp: None,
         };
         let mut writer = Writer::new(&data).unwrap();
+
+        writer.add(deleted.clone()).unwrap();
+        writer.add(kv.clone()).unwrap();
+        writer.close().unwrap();
+
+        let tree = Tree::from_file(&data).unwrap();
+        assert_eq!(tree.get_entry(&key).unwrap(), Some(kv));
+        assert_eq!(tree.get_entry(&deleted_key).unwrap(), Some(deleted));
+    }
+
+    #[test]
+    fn snappy_roundtrip() {
+        let dir = tempdir().unwrap();
+        let data = dir.as_ref().join("test.data");
+        let deleted_key = "deleted".to_owned().into_bytes();
+        let key = "key".to_owned().into_bytes();
+        let value = "value".to_owned().into_bytes();
+
+        let deleted = Entry::Deleted {
+            key: deleted_key.clone(),
+            timestamp: None,
+        };
+        let kv = Entry::KeyVal {
+            key: key.clone(),
+            value: value.clone(),
+            timestamp: None,
+        };
+        let mut writer = Writer::with_compression(&data, Compression::Snappy).unwrap();
+
+        writer.add(deleted.clone()).unwrap();
+        writer.add(kv.clone()).unwrap();
+        writer.close().unwrap();
+
+        let tree = Tree::from_file(&data).unwrap();
+        assert_eq!(tree.get_entry(&key).unwrap(), Some(kv));
+        assert_eq!(tree.get_entry(&deleted_key).unwrap(), Some(deleted));
+    }
+
+    #[test]
+    fn gzip_roundtrip() {
+        let dir = tempdir().unwrap();
+        let data = dir.as_ref().join("test.data");
+        let deleted_key = "deleted".to_owned().into_bytes();
+        let key = "key".to_owned().into_bytes();
+        let value = "value".to_owned().into_bytes();
+
+        let deleted = Entry::Deleted {
+            key: deleted_key.clone(),
+            timestamp: None,
+        };
+        let kv = Entry::KeyVal {
+            key: key.clone(),
+            value: value.clone(),
+            timestamp: None,
+        };
+        let mut writer = Writer::with_compression(&data, Compression::Gzip).unwrap();
+
+        writer.add(deleted.clone()).unwrap();
+        writer.add(kv.clone()).unwrap();
+        writer.close().unwrap();
+
+        let tree = Tree::from_file(&data).unwrap();
+        assert_eq!(tree.get_entry(&key).unwrap(), Some(kv));
+        assert_eq!(tree.get_entry(&deleted_key).unwrap(), Some(deleted));
+    }
+
+    #[test]
+    fn lz4_roundtrip() {
+        let dir = tempdir().unwrap();
+        let data = dir.as_ref().join("test.data");
+        let deleted_key = "deleted".to_owned().into_bytes();
+        let key = "key".to_owned().into_bytes();
+        let value = "value".to_owned().into_bytes();
+
+        let deleted = Entry::Deleted {
+            key: deleted_key.clone(),
+            timestamp: None,
+        };
+        let kv = Entry::KeyVal {
+            key: key.clone(),
+            value: value.clone(),
+            timestamp: None,
+        };
+        let mut writer = Writer::with_compression(&data, Compression::Lz4).unwrap();
 
         writer.add(deleted.clone()).unwrap();
         writer.add(kv.clone()).unwrap();

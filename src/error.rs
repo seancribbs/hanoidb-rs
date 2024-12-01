@@ -39,8 +39,11 @@ pub enum Error {
     #[error("bloom filter did not serialize or deserialize: {0}")]
     BloomFilterCorrupted(#[from] postcard::Error),
 
+    #[error("snappy decompression error: {0}")]
+    SnappyDecompression(#[from] snap::Error),
+
     #[error("snappy compression error: {0}")]
-    SnappyCompression(#[from] snap::Error),
+    SnappyCompression(std::io::Error),
 
     #[error("lz4 compression error: {0}")]
     Lz4Compression(#[from] lz4_flex::frame::Error),

@@ -1,10 +1,54 @@
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
+use crate::compression::Compression;
 use crate::entry::Entry;
 use crate::error::*;
 use crate::level::{level_size, Level};
 use crate::nursery::{Nursery, Value};
+
+/// Options used to open a HanoiDB instance.
+pub struct OpenOptions<P: AsRef<Path>> {
+    path: P,
+    min_level: u32,
+    max_level: u32,
+    compression: Compression,
+}
+
+impl<P: AsRef<Path>> OpenOptions<P> {
+    /// Creates a new options builder for opening a HanoiDB instance
+    pub fn new(path: P) -> Self {
+        Self {
+            path,
+            min_level: 10,
+            max_level: 25,
+            compression: Compression::None,
+        }
+    }
+
+    /// Sets the minimum level for the HanoiDB instance. Defaults to 10.
+    pub fn with_min_level(mut self, min_level: u32) -> Self {
+        self.min_level = min_level;
+        self
+    }
+
+    /// Sets the maximum level for the HanoiDB instance. Defaults to 25.
+    pub fn with_max_level(mut self, max_level: u32) -> Self {
+        self.max_level = max_level;
+        self
+    }
+
+    /// Sets the compression algorithm for the HanoiDB instances. Defaults to `Compresssion::None`.
+    pub fn with_compression(mut self, compression: Compression) -> Self {
+        self.compression = compression;
+        self
+    }
+
+    /// Opens the HanoiDB instance with the recorded options.
+    pub fn open(self) -> Result<HanoiDB> {
+        HanoiDB::with_options(self)
+    }
+}
 
 /// A HanoiDB instance wrapping a directory of files.
 pub struct HanoiDB {
@@ -18,21 +62,23 @@ pub struct HanoiDB {
 impl HanoiDB {
     /// Opens a directory as a HanoiDB instance with
     /// the default minimum level as 10 and maximum level as 25.
-    /// Equivalent to `HanoiDB::open_with_min_and_max_levels(path, 10, 25)`.
+    /// Equivalent to `HanoiDBOpenOptions::new(path).open()`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        Self::open_with_min_and_max_levels(path, 10, 25)
+        OpenOptions::new(path).open()
     }
 
-    /// Opens a directory as a HanoiDB instance with the given min and max levels.
-    pub fn open_with_min_and_max_levels(
-        path: impl AsRef<Path>,
-        min_level: u32,
-        max_level: u32,
-    ) -> Result<Self> {
+    /// Opens a directory as a HanoiDB instance with the given options.
+    pub fn with_options<P: AsRef<Path>>(options: OpenOptions<P>) -> Result<Self> {
+        let OpenOptions {
+            path,
+            min_level,
+            max_level,
+            compression,
+        } = options;
         let path = path.as_ref().to_path_buf();
-        let (nursery, recovery) = Nursery::new(&path, min_level)?;
+        let (nursery, recovery) = Nursery::new(&path, min_level, compression)?;
         let levels = (min_level..=max_level)
-            .map(|level| Level::new(&path, level))
+            .map(|level| Level::new(&path, level, compression))
             .collect::<Result<Vec<Level>>>()?;
         let mut db = Self {
             path,

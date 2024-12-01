@@ -10,7 +10,6 @@ pub struct Block<'a> {
     pub start: u64,
     pub blocklen: u32,
     pub level: u16,
-    #[allow(dead_code)]
     pub compression: Compression,
     file: &'a File,
 }

@@ -1,6 +1,6 @@
 use tempfile::tempdir;
 
-use hanoidb::HanoiDB;
+use hanoidb::*;
 
 #[test]
 fn read_empty_database() {
@@ -45,6 +45,32 @@ fn open_existing_dir() {
     }
     let db = HanoiDB::open(&dir).unwrap();
     assert_eq!(db.get(&key).unwrap(), Some(value));
+}
+
+#[test]
+fn create_database_with_options() {
+    let dir = tempdir().unwrap();
+    let mut db = OpenOptions::new(&dir)
+        .with_compression(Compression::Lz4)
+        .open()
+        .unwrap();
+    for i in 0..1024 {
+        let key = format!("key-{i}").into_bytes();
+        let value = format!("value-{i}").into_bytes();
+        db.insert(key, value)
+            .map_err(|err| {
+                eprintln!("Could not insert key {i} because {err:?}");
+                eprintln!("Directory contents:\n{}", ls(&dir));
+                err
+            })
+            .unwrap();
+    }
+    for i in 0..1024 {
+        let key = format!("key-{i}").into_bytes();
+        let value = format!("value-{i}").into_bytes();
+        let found_value = db.get(&key).unwrap();
+        assert_eq!(Some(value), found_value, "Expected to find key {}", i);
+    }
 }
 
 #[test]

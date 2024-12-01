@@ -20,5 +20,6 @@ const TAG_DELETED2: u8 = 0x85;
 const TAG_END: u8 = 0xFF;
 const MAGIC: &str = "HAN3";
 
-pub use db::HanoiDB;
+pub use compression::Compression;
+pub use db::{HanoiDB, OpenOptions};
 pub use error::*;

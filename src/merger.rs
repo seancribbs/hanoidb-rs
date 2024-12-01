@@ -2,9 +2,9 @@ use std::cmp::Ordering;
 use std::iter::Peekable;
 use std::path::Path;
 
-use crate::error::*;
 use crate::tree::{Tree, TreeEntryIterator};
 use crate::writer::Writer;
+use crate::{error::*, Compression};
 
 pub struct Merger {
     a: Peekable<TreeEntryIterator>,
@@ -19,11 +19,17 @@ impl std::fmt::Debug for Merger {
 }
 
 impl Merger {
-    pub fn new(path: impl AsRef<Path>, level: u32, a_tree: &Tree, b_tree: &Tree) -> Result<Self> {
+    pub fn new(
+        path: impl AsRef<Path>,
+        level: u32,
+        a_tree: &Tree,
+        b_tree: &Tree,
+        compression: Compression,
+    ) -> Result<Self> {
         let a = a_tree.entries()?.peekable();
         let b = b_tree.entries()?.peekable();
         let xfile = path.as_ref().to_path_buf().join(format!("X-{level}.data"));
-        let x = Writer::with_expected_num_items(&xfile, 1 << (level + 1))?;
+        let x = Writer::with_expected_num_items(&xfile, 1 << (level + 1), compression)?;
         Ok(Self { a, b, x })
     }
 
@@ -122,7 +128,7 @@ mod tests {
         // Open the trees and do a complete merge
         let a_tree = Tree::from_file(&a_data).unwrap();
         let b_tree = Tree::from_file(&b_data).unwrap();
-        let merger = Merger::new(&dir, 10, &a_tree, &b_tree).unwrap();
+        let merger = Merger::new(&dir, 10, &a_tree, &b_tree, Default::default()).unwrap();
 
         let result = merger.incremental_merge(512).unwrap();
         let MergeOutcome::Complete { count, steps } = result else {
@@ -153,7 +159,7 @@ mod tests {
         // Open the trees and do an incomplete merge
         let a_tree = Tree::from_file(&a_data).unwrap();
         let b_tree = Tree::from_file(&b_data).unwrap();
-        let merger = Merger::new(&dir, 10, &a_tree, &b_tree).unwrap();
+        let merger = Merger::new(&dir, 10, &a_tree, &b_tree, Default::default()).unwrap();
 
         let result = merger.incremental_merge(1).unwrap();
         assert!(matches!(result, MergeOutcome::Continue(_)));
@@ -193,7 +199,7 @@ mod tests {
         // Open the trees and do a complete merge
         let a_tree = Tree::from_file(&a_data).unwrap();
         let b_tree = Tree::from_file(&b_data).unwrap();
-        let merger = Merger::new(&dir, 10, &a_tree, &b_tree).unwrap();
+        let merger = Merger::new(&dir, 10, &a_tree, &b_tree, Default::default()).unwrap();
 
         let result = merger.incremental_merge(512).unwrap();
         assert!(matches!(result, MergeOutcome::Complete { .. }));
@@ -237,7 +243,7 @@ mod tests {
         // Open the trees and do a complete merge
         let a_tree = Tree::from_file(&a_data).unwrap();
         let b_tree = Tree::from_file(&b_data).unwrap();
-        let merger = Merger::new(&dir, 10, &a_tree, &b_tree).unwrap();
+        let merger = Merger::new(&dir, 10, &a_tree, &b_tree, Default::default()).unwrap();
 
         let result = merger.incremental_merge(512).unwrap();
         assert!(matches!(result, MergeOutcome::Complete { .. }));

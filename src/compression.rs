@@ -2,9 +2,11 @@ use std::io::{Read, Write};
 
 use crate::error::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum Compression {
+    #[default]
     None = 0,
     Snappy = 1,
     Gzip = 2,
@@ -29,7 +31,13 @@ impl Compression {
     pub fn compress(&self, input: Vec<u8>) -> Result<Vec<u8>> {
         match self {
             Compression::None => Ok(input),
-            Compression::Snappy => Ok(snap::raw::Encoder::new().compress_vec(&input)?),
+            Compression::Snappy => {
+                let mut writer = snap::write::FrameEncoder::new(Vec::with_capacity(input.len()));
+                writer.write_all(&input)?;
+                writer
+                    .into_inner()
+                    .map_err(|err| Error::SnappyCompression(err.into_error()))
+            }
             Compression::Gzip => {
                 let mut writer = flate2::write::GzEncoder::new(
                     Vec::with_capacity(input.len()),

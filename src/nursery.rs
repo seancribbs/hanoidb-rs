@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use crate::db::Command;
 use crate::entry::Entry;
-use crate::error::*;
 use crate::writer::Writer;
+use crate::{error::*, Compression};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
@@ -25,13 +25,18 @@ pub struct Nursery {
     min_level: u32,
     total_size: usize,
     step: usize,
+    compression: Compression,
 }
 
 impl Nursery {
-    pub fn new(directory: impl AsRef<Path>, min_level: u32) -> Result<(Self, Option<Command>)> {
+    pub fn new(
+        directory: impl AsRef<Path>,
+        min_level: u32,
+        compression: Compression,
+    ) -> Result<(Self, Option<Command>)> {
         let directory = directory.as_ref().to_path_buf();
         let file = directory.join("nursery.log");
-        let recovery = Self::recover(&file, min_level)?;
+        let recovery = Self::recover(&file, min_level, compression)?;
         let log = OpenOptions::new()
             .create_new(true)
             .append(true)
@@ -44,6 +49,7 @@ impl Nursery {
                 min_level,
                 total_size: 0,
                 step: 0,
+                compression,
             },
             recovery,
         ))
@@ -88,7 +94,8 @@ impl Nursery {
         let min_level_size = 1 << self.min_level;
         if self.data.len() >= min_level_size {
             let filename = self.directory.join("nursery.data");
-            let mut writer = Writer::with_expected_num_items(&filename, min_level_size)?;
+            let mut writer =
+                Writer::with_expected_num_items(&filename, min_level_size, self.compression)?;
             let data = std::mem::take(&mut self.data);
             for (key, value) in data.into_iter() {
                 let entry = match value {
@@ -131,7 +138,11 @@ impl Nursery {
         Ok(commands)
     }
 
-    fn recover(log_file: impl AsRef<Path>, target_level: u32) -> Result<Option<Command>> {
+    fn recover(
+        log_file: impl AsRef<Path>,
+        target_level: u32,
+        compression: Compression,
+    ) -> Result<Option<Command>> {
         if !log_file.as_ref().exists() {
             return Ok(None);
         }
@@ -160,7 +171,8 @@ impl Nursery {
         let command = if !data.is_empty() {
             let mut data_file = log_file.as_ref().to_path_buf();
             data_file.set_file_name("nursery.data");
-            let mut writer = Writer::with_expected_num_items(&data_file, 1 << target_level)?;
+            let mut writer =
+                Writer::with_expected_num_items(&data_file, 1 << target_level, compression)?;
             for (_, entry) in data.into_iter() {
                 writer.add(entry)?;
             }
@@ -189,7 +201,7 @@ mod tests {
     #[test]
     fn fresh_nursery() {
         let dir = tempdir().unwrap();
-        let (nursery, command) = Nursery::new(&dir, MIN_LEVEL).unwrap();
+        let (nursery, command) = Nursery::new(&dir, MIN_LEVEL, Default::default()).unwrap();
         assert!(command.is_none(), "fresh nursery wasn't empty");
         let recovery_data = dir.as_ref().join("nursery.data");
         let log = dir.as_ref().join("nursery.log");
@@ -210,13 +222,13 @@ mod tests {
         let log = dir.as_ref().join("nursery.log");
         // Create a nursery and immediately drop it, leaving data in its log.
         {
-            let (mut nursery, _) = Nursery::new(&dir, MIN_LEVEL).unwrap();
+            let (mut nursery, _) = Nursery::new(&dir, MIN_LEVEL, Default::default()).unwrap();
             let commands = nursery
                 .add("key".as_bytes().to_owned(), "value".as_bytes().to_owned())
                 .unwrap();
             assert!(commands.is_empty());
         }
-        let (nursery, command) = Nursery::new(&dir, MIN_LEVEL).unwrap();
+        let (nursery, command) = Nursery::new(&dir, MIN_LEVEL, Default::default()).unwrap();
         assert!(
             std::fs::exists(&recovery_data).unwrap(),
             "recovery data was not written for fresh nursery"
@@ -240,7 +252,7 @@ mod tests {
         let log = dir.as_ref().join("nursery.log");
         let key = "key".as_bytes().to_owned();
         let value = "value".as_bytes().to_owned();
-        let (mut nursery, _) = Nursery::new(&dir, MIN_LEVEL).unwrap();
+        let (mut nursery, _) = Nursery::new(&dir, MIN_LEVEL, Default::default()).unwrap();
         let commands = nursery.add(key.clone(), value.clone()).unwrap();
         assert!(
             commands.is_empty(),
@@ -261,7 +273,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let log = dir.as_ref().join("nursery.log");
         let key = "key".as_bytes().to_owned();
-        let (mut nursery, _) = Nursery::new(&dir, MIN_LEVEL).unwrap();
+        let (mut nursery, _) = Nursery::new(&dir, MIN_LEVEL, Default::default()).unwrap();
         let commands = nursery.delete(key.clone()).unwrap();
         assert!(
             commands.is_empty(),
@@ -281,7 +293,7 @@ mod tests {
     fn trigger_incremental_merge() {
         let dir = tempdir().unwrap();
         let log = dir.as_ref().join("nursery.log");
-        let (mut nursery, _) = Nursery::new(&dir, MIN_LEVEL).unwrap();
+        let (mut nursery, _) = Nursery::new(&dir, MIN_LEVEL, Default::default()).unwrap();
         let mut commands = vec![];
         // Write 512 KV pairs into the nursery, triggering
         // incremental merge at 1/2 the smallest level size
@@ -314,7 +326,7 @@ mod tests {
         let log = dir.as_ref().join("nursery.log");
         let data = dir.as_ref().join("nursery.data");
 
-        let (mut nursery, _) = Nursery::new(&dir, MIN_LEVEL).unwrap();
+        let (mut nursery, _) = Nursery::new(&dir, MIN_LEVEL, Default::default()).unwrap();
         let mut commands = vec![];
         // Write 1024 KV pairs into the nursery, triggering promotion
         // of the nursery data into the first level
