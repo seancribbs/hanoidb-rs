@@ -48,7 +48,7 @@ impl<'a> Block<'a> {
         let mut decompressor = self.compression.reader(BlockContentsReader {
             file,
             start: self.start + 7, // Skip the header part of the block (7 bytes)
-            end: self.start + (self.blocklen as u64),
+            end: self.start + 4 + (self.blocklen as u64),
         });
 
         // SAFETY: If the blocklen is 0, then reading from the block will never fill
@@ -82,7 +82,7 @@ struct BlockContentsReader {
 
 impl Read for BlockContentsReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if self.start >= self.end {
+        if self.start > self.end {
             return Ok(0);
         }
 
