@@ -18,7 +18,7 @@ pub struct Block<'a> {
 impl<'a> Block<'a> {
     pub fn from_start(mut file: &'a File, start: u64) -> Result<Self> {
         file.seek(SeekFrom::Start(start))?;
-        let mut header = vec![0; 8];
+        let mut header = vec![0; 7];
         file.read_exact(&mut header)?;
         let blocklen = u32::from_be_bytes(header[0..4].try_into()?);
         let level = u16::from_be_bytes(header[4..6].try_into()?);
@@ -35,21 +35,15 @@ impl<'a> Block<'a> {
 
     pub fn from_start_length(file: &'a File, start: u64, length: u32) -> Result<Self> {
         let block = Self::from_start(file, start)?;
-        let expected_length = length - 4;
-        if block.blocklen == expected_length {
+        if block.blocklen == length {
             Ok(block)
         } else {
-            Err(Error::IncorrectBlockLength(expected_length, block.blocklen))
+            Err(Error::IncorrectBlockLength(length, block.blocklen))
         }
     }
 
     pub fn entries(&self) -> Result<EntryIterator> {
-        let file = self.file.try_clone()?;
-        let mut decompressor = self.compression.reader(BlockContentsReader {
-            file,
-            start: self.start + 7, // Skip the header part of the block (7 bytes)
-            end: self.start + 4 + (self.blocklen as u64),
-        });
+        let mut decompressor = self.compression.reader(BlockContentsReader::new(self)?);
 
         // SAFETY: If the blocklen is 0, then reading from the block will never fill
         // a buffer because start > end. Therefore we don't need to check for the tag
@@ -78,6 +72,21 @@ struct BlockContentsReader {
     file: File,
     start: u64,
     end: u64,
+}
+
+impl BlockContentsReader {
+    fn new(block: &Block) -> Result<Self> {
+        let file = block.file.try_clone()?;
+        // The 4-byte blocklen field at the head of the block is not included in the length
+        let start_after_blocklen = block.start + 4;
+        Ok(BlockContentsReader {
+            file,
+            // Skip the header fields of the block (2 byte level + 1 byte compression)
+            start: start_after_blocklen + 2 + 1,
+            // End is start + 4 bytes blocklen + [blocklen]
+            end: start_after_blocklen + (block.blocklen as u64),
+        })
+    }
 }
 
 impl Read for BlockContentsReader {

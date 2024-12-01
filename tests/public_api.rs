@@ -54,6 +54,29 @@ fn lots_of_entries() {
     for i in 0..2048 {
         let key = format!("key-{i}").into_bytes();
         let value = format!("value-{i}").into_bytes();
-        db.insert(key, value).unwrap();
+        db.insert(key, value)
+            .map_err(|err| {
+                eprintln!("Could not insert key {i} because {err:?}");
+                eprintln!("Directory contents:\n{}", ls(&dir));
+                err
+            })
+            .unwrap();
     }
+    for i in 0..2048 {
+        let key = format!("key-{i}").into_bytes();
+        let value = format!("value-{i}").into_bytes();
+        let found_value = db.get(&key).unwrap();
+        assert_eq!(Some(value), found_value, "Expected to find key {}", i);
+    }
+}
+
+fn ls(path: impl AsRef<std::path::Path>) -> String {
+    std::fs::read_dir(path)
+        .unwrap()
+        .flat_map(|dir_entry| {
+            dir_entry
+                .ok()
+                .map(|d| format!("  {}\n", d.file_name().to_string_lossy()))
+        })
+        .collect()
 }

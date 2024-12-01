@@ -153,7 +153,10 @@ impl Writer {
         }
         let compressed = self.compress.compress(contents)?;
 
-        header.extend(((compressed.len() + 2) as u32).to_be_bytes());
+        // blocklen = 2 bytes level + 1 byte compression + length of compressed contents
+        let blocklen: u32 = (2 + 1 + compressed.len()).try_into().unwrap();
+
+        header.extend(blocklen.to_be_bytes());
         header.extend(block.level.to_be_bytes());
         header.push(self.compress as u8);
 
@@ -161,10 +164,9 @@ impl Writer {
         self.index_file.write_all(&compressed)?;
 
         let blockpos = self.index_file_pos;
-        let blocklen: u32 = (compressed.len() + 3).try_into().unwrap();
         self.last_node_pos = Some(blockpos);
         self.last_node_size = Some(blocklen);
-        self.index_file_pos += blocklen as u64;
+        self.index_file_pos += (header.len() + compressed.len()) as u64;
         self.append_to_block(
             block.level + 1,
             Entry::PosLen {
