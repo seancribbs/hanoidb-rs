@@ -6,6 +6,7 @@ use crate::entry::Entry;
 use crate::error::*;
 use crate::level::{level_size, Level};
 use crate::nursery::{Nursery, Value};
+use crate::scan::Scanner;
 
 /// Options used to open a HanoiDB instance.
 pub struct OpenOptions<P: AsRef<Path>> {
@@ -130,6 +131,11 @@ impl HanoiDB {
     /// Returns the directory that contains this database's files.
     pub fn path(&self) -> &Path {
         self.path.as_ref()
+    }
+
+    /// Scans all keys and values in the database.
+    pub fn scan(&self) -> Result<impl Iterator<Item = (Vec<u8>, Vec<u8>)>> {
+        Scanner::new(&self.nursery, &self.levels)
     }
 
     fn handle_commands(&mut self, commands: Vec<Command>) -> Result<()> {

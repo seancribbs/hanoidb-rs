@@ -48,6 +48,16 @@ impl Level {
         Ok(level)
     }
 
+    pub fn tree_files(&self) -> Vec<PathBuf> {
+        ["C", "B", "A"]
+            .into_iter()
+            .flat_map(|prefix| {
+                let file = data_file_name(&self.path, self.level, prefix);
+                file.exists().then_some(file)
+            })
+            .collect()
+    }
+
     pub fn get_entry(&self, key: &[u8]) -> Result<Option<Entry>> {
         for tree in [&self.c, &self.b, &self.a].into_iter().flatten() {
             let entry = tree.get_entry(key)?;

@@ -15,7 +15,7 @@ pub enum Value {
     Deleted,
 }
 
-type NurseryData = BTreeMap<Vec<u8>, Value>;
+pub type NurseryData = BTreeMap<Vec<u8>, Value>;
 
 #[derive(Debug)]
 pub struct Nursery {
@@ -188,6 +188,10 @@ impl Nursery {
 
         remove_file(log_file)?;
         Ok(command)
+    }
+
+    pub fn data(&self) -> &NurseryData {
+        &self.data
     }
 }
 
