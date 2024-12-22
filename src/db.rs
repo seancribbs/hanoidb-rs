@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::ops::RangeBounds;
 use std::path::{Path, PathBuf};
 
 use crate::compression::Compression;
@@ -135,7 +136,15 @@ impl HanoiDB {
 
     /// Scans all keys and values in the database.
     pub fn scan(&self) -> Result<impl Iterator<Item = (Vec<u8>, Vec<u8>)>> {
-        Scanner::new(&self.nursery, &self.levels)
+        Scanner::new(&self.nursery, &self.levels, ..)
+    }
+
+    /// Scans all keys and values in the database where keys are in the given range.
+    pub fn range_scan(
+        &self,
+        range: impl RangeBounds<Vec<u8>> + Clone,
+    ) -> Result<impl Iterator<Item = (Vec<u8>, Vec<u8>)>> {
+        Scanner::new(&self.nursery, &self.levels, range)
     }
 
     fn handle_commands(&mut self, commands: Vec<Command>) -> Result<()> {

@@ -6,26 +6,46 @@ use crate::{level::Level, nursery::Nursery};
 use std::cmp::Ordering;
 use std::collections::btree_map;
 use std::iter::Peekable;
+use std::ops::{Bound, RangeBounds};
 use std::time::SystemTime;
 
-pub struct Scanner {
+pub trait ScanRange: RangeBounds<Vec<u8>> + Clone {}
+
+pub struct Scanner<R: ScanRange> {
     nursery: Peekable<btree_map::IntoIter<Vec<u8>, Value>>,
-    levels: Vec<Peekable<LevelScanner>>,
+    levels: Vec<Peekable<LevelScanner<R>>>,
+    range: R,
 }
 
-impl Scanner {
-    pub fn new(nursery: &Nursery, levels: &[Level]) -> Result<Self> {
+impl<T> ScanRange for T where T: RangeBounds<Vec<u8>> + Clone {}
+
+type NurseryBoundComparator = Box<dyn Fn(&(Vec<u8>, Value)) -> bool>;
+
+impl<R: ScanRange> Scanner<R> {
+    pub fn new(nursery: &Nursery, levels: &[Level], range: R) -> Result<Self> {
         let id = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         let levels = levels
             .iter()
-            .map(|level| LevelScanner::new(level, &id).map(|l| l.peekable()))
+            .map(|level| LevelScanner::new(level, &id, range.clone()).map(|l| l.peekable()))
             .collect::<Result<Vec<_>>>()?;
+        let mut nursery = nursery.data().clone().into_iter().peekable();
+        let comparator: Option<NurseryBoundComparator> = match range.start_bound().cloned() {
+            Bound::Included(bound) => Some(Box::new(move |pair| pair.0 < bound)),
+            Bound::Excluded(bound) => Some(Box::new(move |pair| pair.0 <= bound)),
+            Bound::Unbounded => None,
+        };
+        if let Some(comparator) = comparator {
+            while nursery.peek().map(&comparator) == Some(true) {
+                let _ = nursery.next();
+            }
+        }
         Ok(Self {
-            nursery: nursery.data().clone().into_iter().peekable(),
+            nursery,
             levels,
+            range,
         })
     }
 
@@ -38,7 +58,7 @@ impl Scanner {
     }
 }
 
-impl Iterator for Scanner {
+impl<R: ScanRange> Iterator for Scanner<R> {
     type Item = (Vec<u8>, Vec<u8>);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -62,10 +82,11 @@ impl Iterator for Scanner {
 
             match self.nursery.peek().cloned() {
                 Some((key, _))
-                    if keys_and_indexes[smallest_key_index]
-                        .1
-                        .map(|k| k >= &key)
-                        .unwrap_or(true) =>
+                    if self.range.contains(&key)
+                        && keys_and_indexes[smallest_key_index]
+                            .1
+                            .map(|k| k >= &key)
+                            .unwrap_or(true) =>
                 {
                     // Consume the nursery entry
                     let (nursery_key, nursery_value) = self.nursery.next().unwrap();
@@ -82,6 +103,28 @@ impl Iterator for Scanner {
                 // Either the nursery was exhausted, or the levels had a smaller key
                 _ => (),
             }
+
+            // If the smallest key from the levels is out of bounds, return None early.
+            match self.range.end_bound() {
+                Bound::Included(bound)
+                    if keys_and_indexes[smallest_key_index]
+                        .1
+                        .map(|k| k > bound)
+                        .unwrap_or(false) =>
+                {
+                    return None
+                }
+                Bound::Excluded(bound)
+                    if keys_and_indexes[smallest_key_index]
+                        .1
+                        .map(|k| k >= bound)
+                        .unwrap_or(false) =>
+                {
+                    return None
+                }
+                _ => (),
+            }
+
             // Consume the first level iterator as the return value.
             return Some(match self.levels[smallest_key_index].next() {
                 Some(entry) if entry.is_deleted() || entry.is_key_val() => {
@@ -102,24 +145,38 @@ impl Iterator for Scanner {
     }
 }
 
-struct LevelScanner {
+struct LevelScanner<R: ScanRange> {
     trees: Vec<Peekable<TreeEntryIterator>>,
+    range: R,
 }
 
-impl LevelScanner {
-    fn new(level: &Level, id: &u128) -> Result<Self> {
+type EntryBoundComparator = Box<dyn Fn(&Entry) -> bool>;
+
+impl<R: ScanRange> LevelScanner<R> {
+    fn new(level: &Level, id: &u128, range: R) -> Result<Self> {
+        let comparator: Option<EntryBoundComparator> = match range.start_bound().cloned() {
+            Bound::Included(bound) => Some(Box::new(move |e: &Entry| e.key() < &bound)),
+            Bound::Excluded(bound) => Some(Box::new(move |e: &Entry| e.key() <= &bound)),
+            Bound::Unbounded => None,
+        };
         let mut trees = vec![];
         for source_file in level.tree_files().iter() {
             let scan_file = source_file.with_extension(format!("scan-{id}"));
             std::fs::hard_link(source_file, &scan_file)?;
-            trees.push(Tree::from_file(scan_file)?.entries()?.peekable());
+            let mut tree = Tree::from_file(&scan_file)?.entries()?.peekable();
+            if let Some(comparator) = &comparator {
+                while tree.peek().map(comparator).unwrap_or(false) {
+                    let _ = tree.next();
+                }
+            }
+            trees.push(tree);
         }
 
-        Ok(Self { trees })
+        Ok(Self { trees, range })
     }
 }
 
-impl Iterator for LevelScanner {
+impl<R: ScanRange> Iterator for LevelScanner<R> {
     type Item = Entry;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -159,6 +216,26 @@ impl Iterator for LevelScanner {
             })
             .map(|(i, _)| *i)
             .expect("no trees to scan in level");
+
+        match self.range.end_bound() {
+            Bound::Included(bound)
+                if keys_and_indexes[smallest_key_index]
+                    .1
+                    .map(|k| k > bound)
+                    .unwrap_or(false) =>
+            {
+                return None
+            }
+            Bound::Excluded(bound)
+                if keys_and_indexes[smallest_key_index]
+                    .1
+                    .map(|k| k >= bound)
+                    .unwrap_or(false) =>
+            {
+                return None
+            }
+            _ => (),
+        }
 
         // Consume the first iterator as the return value.
         Some(match self.trees[smallest_key_index].next() {
@@ -241,7 +318,7 @@ mod tests {
 
         let level = Level::new(&dir, 10, Default::default()).unwrap();
         let id: u128 = 123456;
-        let scanner = LevelScanner::new(&level, &id).unwrap();
+        let scanner = LevelScanner::new(&level, &id, ..).unwrap();
         // => C1, B2, C3, A4, B5, C6T
         assert_eq!(
             scanner.collect::<Vec<Entry>>(),
