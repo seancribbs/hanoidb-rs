@@ -1,7 +1,7 @@
 use crate::entry::Entry;
+use crate::error::*;
 use crate::nursery::Value;
 use crate::tree::{Tree, TreeEntryIterator};
-use crate::{error::*, nursery};
 use crate::{level::Level, nursery::Nursery};
 use std::cmp::Ordering;
 use std::collections::btree_map;
@@ -9,7 +9,6 @@ use std::iter::Peekable;
 use std::time::SystemTime;
 
 pub struct Scanner {
-    id: u128,
     nursery: Peekable<btree_map::IntoIter<Vec<u8>, Value>>,
     levels: Vec<Peekable<LevelScanner>>,
 }
@@ -25,14 +24,13 @@ impl Scanner {
             .map(|level| LevelScanner::new(level, &id).map(|l| l.peekable()))
             .collect::<Result<Vec<_>>>()?;
         Ok(Self {
-            id,
             nursery: nursery.data().clone().into_iter().peekable(),
             levels,
         })
     }
 
-    fn consume_level_keys(&mut self, smallest_key_index: usize, key: &[u8]) {
-        for index in smallest_key_index + 1..self.levels.len() {
+    fn consume_level_keys(&mut self, start_index: usize, key: &[u8]) {
+        for index in start_index..self.levels.len() {
             if self.levels[index].peek().map(|e| e.key()) == Some(key) {
                 let _ = self.levels[index].next();
             }
@@ -63,12 +61,14 @@ impl Iterator for Scanner {
                 .expect("no levels to scan");
 
             match self.nursery.peek().cloned() {
-                Some((nursery_key, nursery_value))
+                Some((key, _))
                     if keys_and_indexes[smallest_key_index]
                         .1
-                        .map(|k| k >= &nursery_key)
+                        .map(|k| k >= &key)
                         .unwrap_or(true) =>
                 {
+                    // Consume the nursery entry
+                    let (nursery_key, nursery_value) = self.nursery.next().unwrap();
                     // consume all the iterators in the levels that are the same as the nursery key
                     self.consume_level_keys(0, &nursery_key);
                     match nursery_value {
@@ -87,7 +87,7 @@ impl Iterator for Scanner {
                 Some(entry) if entry.is_deleted() || entry.is_key_val() => {
                     let key = entry.key();
 
-                    self.consume_level_keys(smallest_key_index, key);
+                    self.consume_level_keys(smallest_key_index + 1, key);
                     if let Entry::KeyVal { key, value, .. } = entry {
                         (key, value)
                     } else {
