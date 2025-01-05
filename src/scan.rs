@@ -6,18 +6,18 @@ use crate::{level::Level, nursery::Nursery};
 use std::cmp::Ordering;
 use std::collections::btree_map;
 use std::iter::Peekable;
+use std::marker::PhantomData;
 use std::ops::{Bound, RangeBounds};
 use std::time::SystemTime;
 
 pub trait ScanRange: RangeBounds<Vec<u8>> + Clone {}
+impl<T> ScanRange for T where T: RangeBounds<Vec<u8>> + Clone {}
 
 pub struct Scanner<R: ScanRange> {
     nursery: Peekable<btree_map::IntoIter<Vec<u8>, Value>>,
     levels: Vec<Peekable<LevelScanner<R>>>,
     range: R,
 }
-
-impl<T> ScanRange for T where T: RangeBounds<Vec<u8>> + Clone {}
 
 type NurseryBoundComparator = Box<dyn Fn(&(Vec<u8>, Value)) -> bool>;
 
@@ -104,27 +104,6 @@ impl<R: ScanRange> Iterator for Scanner<R> {
                 _ => (),
             }
 
-            // If the smallest key from the levels is out of bounds, return None early.
-            match self.range.end_bound() {
-                Bound::Included(bound)
-                    if keys_and_indexes[smallest_key_index]
-                        .1
-                        .map(|k| k > bound)
-                        .unwrap_or(false) =>
-                {
-                    return None
-                }
-                Bound::Excluded(bound)
-                    if keys_and_indexes[smallest_key_index]
-                        .1
-                        .map(|k| k >= bound)
-                        .unwrap_or(false) =>
-                {
-                    return None
-                }
-                _ => (),
-            }
-
             // Consume the first level iterator as the return value.
             return Some(match self.levels[smallest_key_index].next() {
                 Some(entry) if entry.is_deleted() || entry.is_key_val() => {
@@ -146,33 +125,26 @@ impl<R: ScanRange> Iterator for Scanner<R> {
 }
 
 struct LevelScanner<R: ScanRange> {
-    trees: Vec<Peekable<TreeEntryIterator>>,
-    range: R,
+    trees: Vec<Peekable<TreeEntryIterator<R>>>,
+    range: PhantomData<R>,
 }
-
-type EntryBoundComparator = Box<dyn Fn(&Entry) -> bool>;
 
 impl<R: ScanRange> LevelScanner<R> {
     fn new(level: &Level, id: &u128, range: R) -> Result<Self> {
-        let comparator: Option<EntryBoundComparator> = match range.start_bound().cloned() {
-            Bound::Included(bound) => Some(Box::new(move |e: &Entry| e.key() < &bound)),
-            Bound::Excluded(bound) => Some(Box::new(move |e: &Entry| e.key() <= &bound)),
-            Bound::Unbounded => None,
-        };
         let mut trees = vec![];
         for source_file in level.tree_files().iter() {
             let scan_file = source_file.with_extension(format!("scan-{id}"));
             std::fs::hard_link(source_file, &scan_file)?;
-            let mut tree = Tree::from_file(&scan_file)?.entries()?.peekable();
-            if let Some(comparator) = &comparator {
-                while tree.peek().map(comparator).unwrap_or(false) {
-                    let _ = tree.next();
-                }
-            }
+            let tree = Tree::from_file(&scan_file)?
+                .entries_in_range(range.clone())?
+                .peekable();
             trees.push(tree);
         }
 
-        Ok(Self { trees, range })
+        Ok(Self {
+            trees,
+            range: PhantomData,
+        })
     }
 }
 
@@ -216,26 +188,6 @@ impl<R: ScanRange> Iterator for LevelScanner<R> {
             })
             .map(|(i, _)| *i)
             .expect("no trees to scan in level");
-
-        match self.range.end_bound() {
-            Bound::Included(bound)
-                if keys_and_indexes[smallest_key_index]
-                    .1
-                    .map(|k| k > bound)
-                    .unwrap_or(false) =>
-            {
-                return None
-            }
-            Bound::Excluded(bound)
-                if keys_and_indexes[smallest_key_index]
-                    .1
-                    .map(|k| k >= bound)
-                    .unwrap_or(false) =>
-            {
-                return None
-            }
-            _ => (),
-        }
 
         // Consume the first iterator as the return value.
         Some(match self.trees[smallest_key_index].next() {

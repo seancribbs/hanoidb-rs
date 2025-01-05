@@ -1,9 +1,11 @@
 use crate::compression::Compression;
 use crate::entry::Entry;
 use crate::error::*;
+use crate::scan::ScanRange;
 use crate::TAG_END;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use std::ops::Bound;
 
 #[derive(Debug)]
 pub struct Block<'a> {
@@ -41,14 +43,21 @@ impl<'a> Block<'a> {
         }
     }
 
-    pub fn entries(&self) -> Result<EntryIterator> {
+    pub fn entries(&self) -> Result<EntryIterator<std::ops::RangeFull>> {
+        self.entries_in_range(..)
+    }
+
+    pub fn entries_in_range<R: ScanRange>(&self, range: R) -> Result<EntryIterator<R>> {
         let mut decompressor = self.compression.reader(BlockContentsReader::new(self)?);
 
         // SAFETY: If the blocklen is 0, then reading from the block will never fill
         // a buffer because start > end. Therefore we don't need to check for the tag
         // byte or advance the reader at all.
         if self.blocklen == 0 {
-            return Ok(EntryIterator(decompressor));
+            return Ok(EntryIterator {
+                reader: decompressor,
+                range,
+            });
         }
 
         // Each block that has entries contains a TAG_END byte at the beginning.
@@ -58,12 +67,19 @@ impl<'a> Block<'a> {
         decompressor.read_exact(&mut tag)?;
 
         if tag[0] == TAG_END {
-            Ok(EntryIterator(decompressor))
+            Ok(EntryIterator {
+                reader: decompressor,
+                range,
+            })
         } else {
             Err(Error::CorruptedFile(
                 "block entries did not start with TAG_END",
             ))
         }
+    }
+
+    pub fn is_leaf(&self) -> bool {
+        self.level == 0
     }
 }
 
@@ -104,13 +120,32 @@ impl Read for BlockContentsReader {
     }
 }
 
-pub struct EntryIterator(Box<dyn Read>);
+pub struct EntryIterator<R: ScanRange> {
+    reader: Box<dyn Read>,
+    range: R,
+}
 
-impl Iterator for EntryIterator {
+impl<R: ScanRange> EntryIterator<R> {
+    fn is_key_before_range(&self, key: &[u8]) -> bool {
+        match self.range.start_bound() {
+            Bound::Included(bound) => key < bound,
+            Bound::Excluded(bound) => key <= bound,
+            Bound::Unbounded => false,
+        }
+    }
+}
+
+impl<R: ScanRange> Iterator for EntryIterator<R> {
     type Item = Entry;
 
     fn next(&mut self) -> Option<Self::Item> {
-        Entry::read(&mut self.0).ok()
+        loop {
+            match Entry::read(&mut self.reader).ok() {
+                Some(entry) if self.is_key_before_range(entry.key()) => continue,
+                Some(entry) if self.range.contains(&entry.key().to_vec()) => return Some(entry),
+                _ => return None,
+            }
+        }
     }
 }
 

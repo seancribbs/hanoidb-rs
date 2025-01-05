@@ -7,8 +7,8 @@ use crate::writer::Writer;
 use crate::{error::*, Compression};
 
 pub struct Merger {
-    a: Peekable<TreeEntryIterator>,
-    b: Peekable<TreeEntryIterator>,
+    a: Peekable<TreeEntryIterator<std::ops::RangeFull>>,
+    b: Peekable<TreeEntryIterator<std::ops::RangeFull>>,
     x: Writer,
 }
 

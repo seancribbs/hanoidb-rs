@@ -1,10 +1,14 @@
 use crate::block::{Block, EntryIterator};
 use crate::entry::Entry;
 use crate::error::*;
+use crate::range::RangeOverlap;
+use crate::scan::ScanRange;
 use crate::trailer::Trailer;
 use crate::MAGIC;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use std::iter::Peekable;
+
 use std::path::Path;
 
 pub struct Tree {
@@ -69,7 +73,11 @@ impl Tree {
         Trailer::new(bloom, root_pos)
     }
 
-    pub fn entries(&self) -> Result<TreeEntryIterator> {
+    pub fn entries_in_range<R: ScanRange>(&self, range: R) -> Result<TreeEntryIterator<R>> {
+        TreeEntryIterator::with_range(self.try_clone()?, range)
+    }
+
+    pub fn entries(&self) -> Result<TreeEntryIterator<std::ops::RangeFull>> {
         TreeEntryIterator::new(self.try_clone()?)
     }
 
@@ -105,44 +113,89 @@ impl Tree {
     }
 }
 
-pub struct TreeEntryIterator {
+pub struct TreeEntryIterator<R: ScanRange> {
     tree: Tree,
-    levels: Vec<EntryIterator>,
+    inner_blocks: Vec<Peekable<EntryIterator<std::ops::RangeFull>>>,
+    leaf_block: Option<EntryIterator<R>>,
+    range: R,
 }
 
-impl TreeEntryIterator {
+impl TreeEntryIterator<std::ops::RangeFull> {
     fn new(tree: Tree) -> Result<Self> {
-        let root_iter = tree.root_block()?.entries()?;
+        Self::with_range(tree, ..)
+    }
+}
+
+impl<R: ScanRange> TreeEntryIterator<R> {
+    fn with_range(tree: Tree, range: R) -> Result<Self> {
+        let mut inner_blocks = vec![];
+        let mut leaf_block = None;
+        let root = tree.root_block()?;
+        if root.is_leaf() {
+            leaf_block = Some(root.entries_in_range(range.clone())?);
+        } else {
+            inner_blocks.push(root.entries()?.peekable());
+        }
         Ok(Self {
             tree,
-            levels: vec![root_iter],
+            inner_blocks,
+            leaf_block,
+            range,
         })
     }
 }
 
-impl Iterator for TreeEntryIterator {
+// 200..500
+// 1 [100, 400, 800] PosLen
+// 0 [100-399, 400-500, 800-1100] KeyVal/Deleted
+//
+
+impl<R: ScanRange> Iterator for TreeEntryIterator<R> {
     type Item = Entry;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            let level = self.levels.last_mut()?;
+            // Examine the iterator for a leaf block first
+            if let Some(leaf) = self.leaf_block.as_mut() {
+                match leaf.next() {
+                    entry @ Some(_) => return entry,
+                    None => {
+                        self.leaf_block = None;
+                    }
+                }
+            }
+            // We are iterating on an inner block, so try to traverse down the tree
+            let level = self.inner_blocks.last_mut()?;
             match level.next() {
-                Some(entry @ Entry::PosLen { .. }) => {
-                    let block_iterator = self
-                        .tree
-                        .block_from_poslen_entry(&entry)
-                        .ok()?
-                        .entries()
-                        .ok()?;
-                    self.levels.push(block_iterator);
+                Some(entry) if entry.is_pos_len() => {
+                    // Peek at the next entry and determine whether the lower bound of the range crosses it
+                    let next_key = level.peek().map(|e| e.key());
+                    let should_examine_block = {
+                        let range = &self.range;
+                        if let Some(end_key) = next_key {
+                            // We have an upper bound on the range of this block
+                            ((entry.key().to_vec())..(end_key.to_vec())).overlaps(range)
+                        } else {
+                            // This is the last block in this subtree
+                            ((entry.key().to_vec())..).overlaps(range)
+                        }
+                    };
+                    if should_examine_block {
+                        let block = self.tree.block_from_poslen_entry(&entry).ok()?;
+                        if block.is_leaf() {
+                            self.leaf_block = block.entries_in_range(self.range.clone()).ok();
+                        } else {
+                            self.inner_blocks.push(block.entries().ok()?.peekable());
+                        }
+                    }
                     continue;
                 }
-                entry @ Some(_) => {
-                    return entry;
+                Some(entry) => {
+                    unreachable!("inner block contained leaf entry {entry:?}");
                 }
                 None => {
                     // pop this iterator off
-                    let _ = self.levels.pop();
+                    let _ = self.inner_blocks.pop();
                     continue;
                 }
             }

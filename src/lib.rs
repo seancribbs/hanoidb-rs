@@ -6,6 +6,7 @@ mod error;
 mod level;
 mod merger;
 mod nursery;
+mod range;
 mod scan;
 mod trailer;
 mod tree;
